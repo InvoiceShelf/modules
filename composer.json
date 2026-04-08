@@ -1,6 +1,5 @@
 {
     "name": "invoiceshelf/modules",
-    "version": "3.0.0",
     "description": "InvoiceShelf-specific extensions for nwidart/laravel-modules — registry for module-contributed sidebar items and settings schemas.",
     "keywords": [
         "invoiceshelf",
