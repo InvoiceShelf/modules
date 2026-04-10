@@ -4,7 +4,7 @@ namespace $NAMESPACE$;
 
 use Illuminate\Support\Str;
 use InvoiceShelf\Modules\Registry as ModuleRegistry;
-use Nwidart\Modules\Support\ModuleServiceProvider;
+use InvoiceShelf\Modules\Support\ModuleServiceProvider;
 
 class $CLASS$ extends ModuleServiceProvider
 {

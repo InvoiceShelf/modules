@@ -34,6 +34,9 @@ class RegistryTest extends TestCase
         $this->assertCount(1, Registry::allMenu());
         $this->assertSame(
             [
+                'group' => 'modules',
+                'group_label' => 'navigation.modules',
+                'priority' => 100,
                 'title' => 'sales_tax_us::menu.title',
                 'link' => '/admin/modules/sales-tax-us/settings',
                 'icon' => 'CalculatorIcon',
@@ -41,6 +44,52 @@ class RegistryTest extends TestCase
             Registry::menuFor('sales-tax-us'),
         );
         $this->assertNull(Registry::menuFor('does-not-exist'));
+    }
+
+    public function test_register_menu_allows_overriding_group_and_priority(): void
+    {
+        Registry::registerMenu('sales-tax-us', [
+            'title' => 'sales_tax_us::menu.title',
+            'link' => '/admin/modules/sales-tax-us/settings',
+            'icon' => 'CalculatorIcon',
+            'group' => 'documents',
+            'group_label' => 'navigation.documents',
+            'priority' => 25,
+        ]);
+
+        $menu = Registry::menuFor('sales-tax-us');
+        $this->assertSame('documents', $menu['group']);
+        $this->assertSame('navigation.documents', $menu['group_label']);
+        $this->assertSame(25, $menu['priority']);
+    }
+
+    public function test_register_user_menu_round_trip(): void
+    {
+        Registry::registerUserMenu('sales-tax-us', [
+            'title' => 'sales_tax_us::user_menu.title',
+            'link' => '/admin/modules/sales-tax-us/support',
+            'icon' => 'LifebuoyIcon',
+        ]);
+
+        $this->assertCount(1, Registry::allUserMenu());
+        $this->assertSame(
+            [
+                'priority' => 100,
+                'title' => 'sales_tax_us::user_menu.title',
+                'link' => '/admin/modules/sales-tax-us/support',
+                'icon' => 'LifebuoyIcon',
+            ],
+            Registry::allUserMenu()['sales-tax-us'],
+        );
+    }
+
+    public function test_flush_clears_user_menu(): void
+    {
+        Registry::registerUserMenu('a', ['title' => 't', 'link' => '/l', 'icon' => 'i']);
+
+        Registry::flush();
+
+        $this->assertSame([], Registry::allUserMenu());
     }
 
     public function test_register_settings_round_trip(): void

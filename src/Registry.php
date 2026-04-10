@@ -58,13 +58,24 @@ class Registry
     public static array $styles = [];
 
     /**
+     * User dropdown menu items keyed by module slug.
+     *
+     * @var array<string, array{title: string, link: string, icon: string, priority?: int}>
+     */
+    public static array $userMenu = [];
+
+    /**
      * Register a sidebar entry for a module.
      *
      * @param  array{title: string, link: string, icon: string}  $item
      */
     public static function registerMenu(string $slug, array $item): void
     {
-        static::$menu[$slug] = $item;
+        static::$menu[$slug] = array_merge([
+            'group' => 'modules',
+            'group_label' => 'navigation.modules',
+            'priority' => 100,
+        ], $item);
     }
 
     /**
@@ -97,6 +108,29 @@ class Registry
     public static function menuFor(string $slug): ?array
     {
         return static::$menu[$slug] ?? null;
+    }
+
+    /**
+     * Register a user dropdown menu entry for a module.
+     *
+     * Items appear in the user avatar dropdown in the header,
+     * between "Account Settings" and "Logout".
+     *
+     * @param  array{title: string, link: string, icon: string, priority?: int}  $item
+     */
+    public static function registerUserMenu(string $slug, array $item): void
+    {
+        static::$userMenu[$slug] = array_merge([
+            'priority' => 100,
+        ], $item);
+    }
+
+    /**
+     * @return array<string, array{title: string, link: string, icon: string, priority?: int}>
+     */
+    public static function allUserMenu(): array
+    {
+        return static::$userMenu;
     }
 
     /**
@@ -163,6 +197,7 @@ class Registry
     public static function flush(): void
     {
         static::$menu = [];
+        static::$userMenu = [];
         static::$settings = [];
         static::$scripts = [];
         static::$styles = [];
