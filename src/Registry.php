@@ -235,6 +235,29 @@ class Registry
     }
 
     /**
+     * Register an AI driver (chat assistant, text generation, etc).
+     *
+     * Convenience wrapper — modules call this from their ServiceProvider::boot():
+     *
+     *     Registry::registerAiDriver('my_ai_provider', [
+     *         'class'            => MyAiDriver::class,
+     *         'label'            => 'my_module::drivers.my_ai',
+     *         'website'          => 'https://my-ai.example.com',
+     *         'default_base_url' => 'https://api.my-ai.example.com/v1',
+     *         'supported_roles'  => ['chat', 'text_generation'],
+     *         'suggested_models' => [
+     *             ['value' => 'model-a', 'label' => 'Model A'],
+     *         ],
+     *     ]);
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    public static function registerAiDriver(string $name, array $meta): void
+    {
+        static::registerDriver('ai', $name, $meta);
+    }
+
+    /**
      * Get all registered drivers for a given type.
      *
      * @return array<string, array<string, mixed>>  Keyed by driver name

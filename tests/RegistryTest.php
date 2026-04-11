@@ -280,6 +280,33 @@ class RegistryTest extends TestCase
         $this->assertNotNull(Registry::driverMeta('exchange_rate', 'fake_provider'));
     }
 
+    public function test_register_ai_driver_is_a_typed_wrapper(): void
+    {
+        Registry::flushDrivers();
+
+        Registry::registerAiDriver('fake_ai_provider', [
+            'class' => 'FakeAiDriver',
+            'label' => 'fake.ai.label',
+            'supported_roles' => ['chat', 'text_generation'],
+        ]);
+
+        $meta = Registry::driverMeta('ai', 'fake_ai_provider');
+        $this->assertNotNull($meta);
+        $this->assertSame('FakeAiDriver', $meta['class']);
+        $this->assertSame(['chat', 'text_generation'], $meta['supported_roles']);
+    }
+
+    public function test_exchange_rate_and_ai_drivers_live_in_separate_type_buckets(): void
+    {
+        Registry::flushDrivers();
+
+        Registry::registerExchangeRateDriver('shared_name', ['class' => 'RateDriver', 'label' => 'rate']);
+        Registry::registerAiDriver('shared_name',         ['class' => 'AiDriver',   'label' => 'ai']);
+
+        $this->assertSame('RateDriver', Registry::driverMeta('exchange_rate', 'shared_name')['class']);
+        $this->assertSame('AiDriver',   Registry::driverMeta('ai',            'shared_name')['class']);
+    }
+
     public function test_all_drivers_returns_empty_array_for_unknown_type(): void
     {
         Registry::flushDrivers();
