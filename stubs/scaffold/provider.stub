@@ -86,6 +86,36 @@ class $CLASS$ extends ModuleServiceProvider
                 ],
             ],
         ]);
+
+        // -------------------------------------------------------------------
+        // Custom exchange rate driver — uncomment if your module ships one.
+        //
+        // The driver class must extend App\Services\ExchangeRate\ExchangeRateDriver
+        // and implement getExchangeRate(), getSupportedCurrencies(), and
+        // validateConnection(). The host's ExchangeRateProviderModal will pick
+        // up `label`, `website`, and any `config_fields` automatically.
+        //
+        // `config_fields` describe the shape of the driver_config JSON column
+        // and accept the same `text` / `select` types as module settings, plus
+        // a `visible_when` map for conditional fields.
+        // -------------------------------------------------------------------
+        // ModuleRegistry::registerExchangeRateDriver('my_provider', [
+        //     'class' => \Modules\\$MODULE$\\Drivers\\MyExchangeRateDriver::class,
+        //     'label' => $this->nameLower.'::drivers.my_provider',
+        //     'website' => 'https://my-provider.com',
+        //     'config_fields' => [
+        //         [
+        //             'key' => 'region',
+        //             'type' => 'select',
+        //             'label' => $this->nameLower.'::drivers.region',
+        //             'options' => [
+        //                 ['label' => $this->nameLower.'::drivers.region_us', 'value' => 'us'],
+        //                 ['label' => $this->nameLower.'::drivers.region_eu', 'value' => 'eu'],
+        //             ],
+        //             'default' => 'us',
+        //         ],
+        //     ],
+        // ]);
     }
 
     /**

@@ -65,6 +65,22 @@ class Registry
     public static array $userMenu = [];
 
     /**
+     * Driver registrations keyed by type (e.g. 'exchange_rate', 'pdf'), then by driver name.
+     *
+     * Each entry contains at minimum:
+     *   - 'class'  (class-string) — the driver implementation class
+     *   - 'label'  (string)       — i18n key or plain-text display name
+     *
+     * Optional keys:
+     *   - 'website'       (string) — provider website URL
+     *   - 'config_fields' (array)  — schema for driver-specific configuration fields
+     *   - 'resolver'      (Closure) — factory callable (used instead of 'class' when present)
+     *
+     * @var array<string, array<string, array<string, mixed>>>
+     */
+    public static array $drivers = [];
+
+    /**
      * Register a sidebar entry for a module.
      *
      * @param  array{title: string, link: string, icon: string}  $item
@@ -189,10 +205,65 @@ class Registry
     }
 
     /**
-     * Test-only: clear all registered state.
+     * Register a driver for a given type.
+     *
+     * @param  string  $type  Driver category (e.g. 'exchange_rate', 'pdf')
+     * @param  string  $name  Unique driver identifier
+     * @param  array<string, mixed>  $meta  Driver metadata (class, label, website, config_fields, etc.)
+     */
+    public static function registerDriver(string $type, string $name, array $meta): void
+    {
+        static::$drivers[$type][$name] = $meta;
+    }
+
+    /**
+     * Register an exchange rate driver.
+     *
+     * Convenience wrapper — modules call this from their ServiceProvider::boot():
+     *
+     *     Registry::registerExchangeRateDriver('my_provider', [
+     *         'class'   => MyExchangeRateDriver::class,
+     *         'label'   => 'my_module::drivers.my_provider',
+     *         'website' => 'https://my-provider.com',
+     *     ]);
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    public static function registerExchangeRateDriver(string $name, array $meta): void
+    {
+        static::registerDriver('exchange_rate', $name, $meta);
+    }
+
+    /**
+     * Get all registered drivers for a given type.
+     *
+     * @return array<string, array<string, mixed>>  Keyed by driver name
+     */
+    public static function allDrivers(string $type): array
+    {
+        return static::$drivers[$type] ?? [];
+    }
+
+    /**
+     * Get metadata for a single driver.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function driverMeta(string $type, string $name): ?array
+    {
+        return static::$drivers[$type][$name] ?? null;
+    }
+
+    /**
+     * Test-only: clear module-contributed state.
      *
      * Tests that mutate the registry should call this in tearDown() to prevent
      * cross-test contamination, since the registry is process-global.
+     *
+     * Drivers are deliberately *not* cleared here: built-in drivers are registered
+     * once at app boot by host-app service providers, not per-module, and should
+     * persist for the entire test process. Tests that need to assert driver
+     * registration in isolation can use flushDrivers() explicitly.
      */
     public static function flush(): void
     {
@@ -201,5 +272,16 @@ class Registry
         static::$settings = [];
         static::$scripts = [];
         static::$styles = [];
+    }
+
+    /**
+     * Test-only: clear driver registrations.
+     *
+     * Use this when you want to assert that a specific test re-populates the
+     * driver registry. Most tests should not need this.
+     */
+    public static function flushDrivers(): void
+    {
+        static::$drivers = [];
     }
 }

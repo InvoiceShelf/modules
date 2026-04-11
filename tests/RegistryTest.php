@@ -251,4 +251,70 @@ class RegistryTest extends TestCase
         $this->assertSame([], Registry::allScripts());
         $this->assertSame([], Registry::allStyles());
     }
+
+    public function test_register_driver_round_trip(): void
+    {
+        Registry::flushDrivers();
+
+        Registry::registerDriver('exchange_rate', 'fake_provider', [
+            'class' => 'FakeDriver',
+            'label' => 'fake.label',
+        ]);
+
+        $this->assertSame(
+            ['class' => 'FakeDriver', 'label' => 'fake.label'],
+            Registry::driverMeta('exchange_rate', 'fake_provider'),
+        );
+        $this->assertArrayHasKey('fake_provider', Registry::allDrivers('exchange_rate'));
+    }
+
+    public function test_register_exchange_rate_driver_is_a_typed_wrapper(): void
+    {
+        Registry::flushDrivers();
+
+        Registry::registerExchangeRateDriver('fake_provider', [
+            'class' => 'FakeDriver',
+            'label' => 'fake.label',
+        ]);
+
+        $this->assertNotNull(Registry::driverMeta('exchange_rate', 'fake_provider'));
+    }
+
+    public function test_all_drivers_returns_empty_array_for_unknown_type(): void
+    {
+        Registry::flushDrivers();
+
+        $this->assertSame([], Registry::allDrivers('pdf'));
+    }
+
+    public function test_driver_meta_returns_null_for_unknown_driver(): void
+    {
+        Registry::flushDrivers();
+
+        $this->assertNull(Registry::driverMeta('exchange_rate', 'definitely_not_a_real_driver'));
+    }
+
+    public function test_flush_does_not_clear_driver_registrations(): void
+    {
+        Registry::registerExchangeRateDriver('persists', [
+            'class' => 'PersistDriver',
+            'label' => 'persist.label',
+        ]);
+
+        Registry::flush();
+
+        $this->assertNotNull(Registry::driverMeta('exchange_rate', 'persists'));
+
+        Registry::flushDrivers();
+    }
+
+    public function test_flush_drivers_clears_driver_registrations(): void
+    {
+        Registry::registerExchangeRateDriver('a', ['class' => 'A', 'label' => 'a']);
+        Registry::registerExchangeRateDriver('b', ['class' => 'B', 'label' => 'b']);
+
+        Registry::flushDrivers();
+
+        $this->assertSame([], Registry::allDrivers('exchange_rate'));
+    }
 }
