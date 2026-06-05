@@ -260,7 +260,7 @@ class Registry
     /**
      * Get all registered drivers for a given type.
      *
-     * @return array<string, array<string, mixed>>  Keyed by driver name
+     * @return array<string, array<string, mixed>> Keyed by driver name
      */
     public static function allDrivers(string $type): array
     {

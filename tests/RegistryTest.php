@@ -301,10 +301,10 @@ class RegistryTest extends TestCase
         Registry::flushDrivers();
 
         Registry::registerExchangeRateDriver('shared_name', ['class' => 'RateDriver', 'label' => 'rate']);
-        Registry::registerAiDriver('shared_name',         ['class' => 'AiDriver',   'label' => 'ai']);
+        Registry::registerAiDriver('shared_name', ['class' => 'AiDriver',   'label' => 'ai']);
 
         $this->assertSame('RateDriver', Registry::driverMeta('exchange_rate', 'shared_name')['class']);
-        $this->assertSame('AiDriver',   Registry::driverMeta('ai',            'shared_name')['class']);
+        $this->assertSame('AiDriver', Registry::driverMeta('ai', 'shared_name')['class']);
     }
 
     public function test_all_drivers_returns_empty_array_for_unknown_type(): void
