@@ -116,6 +116,29 @@ class $CLASS$ extends ModuleServiceProvider
         //         ],
         //     ],
         // ]);
+
+        // -------------------------------------------------------------------
+        // Custom AI driver — uncomment if your module ships one.
+        //
+        // The driver class must extend App\Support\Ai\AiDriver and implement
+        // chatCompletion(), textCompletion(), and validateConnection(). The
+        // host's AI configuration UI will pick up `label`, `website`,
+        // `supported_roles`, `suggested_models`, and any `config_fields`.
+        //
+        // `supported_roles` tells the host which role slots this driver can
+        // fulfill. v1 roles: 'chat', 'text_generation'.
+        // -------------------------------------------------------------------
+        // ModuleRegistry::registerAiDriver('my_ai_provider', [
+        //     'class' => \Modules\\$MODULE$\\Drivers\\MyAiDriver::class,
+        //     'label' => $this->nameLower.'::drivers.my_ai',
+        //     'website' => 'https://my-ai.example.com',
+        //     'default_base_url' => 'https://api.my-ai.example.com/v1',
+        //     'supported_roles' => ['chat', 'text_generation'],
+        //     'suggested_models' => [
+        //         ['value' => 'model-a', 'label' => 'Model A'],
+        //         ['value' => 'model-b', 'label' => 'Model B'],
+        //     ],
+        // ]);
     }
 
     /**
