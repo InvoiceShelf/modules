@@ -7,7 +7,7 @@ namespace InvoiceShelf\Modules\Tests;
 use InvalidArgumentException;
 use InvoiceShelf\Modules\Registry;
 use InvoiceShelf\Modules\Settings\Schema;
-use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class RegistryTest extends TestCase
 {
@@ -230,26 +230,49 @@ class RegistryTest extends TestCase
 
     public function test_register_script_and_style_round_trip(): void
     {
-        Registry::registerScript('analytics', '/path/to/analytics.js');
-        Registry::registerStyle('theme', '/path/to/theme.css');
+        $script = realpath(__DIR__.'/Fixtures/module.js');
+        $style = realpath(__DIR__.'/Fixtures/module.css');
+        $this->assertIsString($script);
+        $this->assertIsString($style);
 
-        $this->assertSame(['analytics' => '/path/to/analytics.js'], Registry::allScripts());
-        $this->assertSame(['theme' => '/path/to/theme.css'], Registry::allStyles());
-        $this->assertSame('/path/to/analytics.js', Registry::scriptFor('analytics'));
-        $this->assertSame('/path/to/theme.css', Registry::styleFor('theme'));
+        Registry::registerScript('analytics', $script);
+        Registry::registerStyle('theme', $style);
+
+        $this->assertSame(['analytics' => $script], Registry::allScripts());
+        $this->assertSame(['theme' => $style], Registry::allStyles());
+        $this->assertSame($script, Registry::scriptFor('analytics'));
+        $this->assertSame($style, Registry::styleFor('theme'));
         $this->assertNull(Registry::scriptFor('does-not-exist'));
         $this->assertNull(Registry::styleFor('does-not-exist'));
     }
 
     public function test_flush_also_clears_scripts_and_styles(): void
     {
-        Registry::registerScript('s', '/s.js');
-        Registry::registerStyle('t', '/t.css');
+        Registry::registerScript('s', __DIR__.'/Fixtures/module.js');
+        Registry::registerStyle('t', __DIR__.'/Fixtures/module.css');
 
         Registry::flush();
 
         $this->assertSame([], Registry::allScripts());
         $this->assertSame([], Registry::allStyles());
+    }
+
+    #[DataProvider('invalidRuntimeAssets')]
+    public function test_remote_missing_and_wrong_extension_runtime_assets_are_rejected(string $method, string $path, string $message): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Registry::{$method}('asset', $path);
+    }
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function invalidRuntimeAssets(): iterable
+    {
+        yield 'remote script URL' => ['registerScript', 'https://cdn.example.test/module.js', 'existing local file'];
+        yield 'missing style file' => ['registerStyle', __DIR__.'/Fixtures/missing.css', 'existing local file'];
+        yield 'wrong script extension' => ['registerScript', __DIR__.'/Fixtures/module.css', 'must be a .js file'];
+        yield 'wrong style extension' => ['registerStyle', __DIR__.'/Fixtures/module.js', 'must be a .css file'];
     }
 
     public function test_register_driver_round_trip(): void

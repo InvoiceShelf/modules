@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace InvoiceShelf\Modules;
 
+use InvalidArgumentException;
 use InvoiceShelf\Modules\Settings\Schema;
 
 /**
@@ -39,14 +40,12 @@ class Registry
     /**
      * JS/CSS assets a module wants to inject into the host app's main layout.
      *
-     * Stored as `[slug => path]`. Path may be a local file path served by the
-     * host app's ScriptController/StyleController, or a fully-qualified URL
-     * (in which case the host renders a direct <script> tag).
+     * Stored as `[slug => canonical local path]`. Assets must be existing
+     * compiled files inside the installed module package; remote URLs and
+     * runtime-loaded source files are never registered.
      *
-     * Note: this is **not** for shipping Vue components — modules don't ship
-     * SFCs. This is for plain JS/CSS injection (analytics tags, third-party
-     * widgets, custom themes), which is a much smaller surface than runtime
-     * Vue compilation.
+     * Note: this is **not** for shipping Vue components — modules ship only
+     * their pre-built local JS/CSS assets.
      *
      * @var array<string, string>
      */
@@ -167,7 +166,7 @@ class Registry
      */
     public static function registerScript(string $name, string $path): void
     {
-        static::$scripts[$name] = $path;
+        static::$scripts[$name] = self::localAsset($path, 'js');
     }
 
     /**
@@ -175,7 +174,7 @@ class Registry
      */
     public static function registerStyle(string $name, string $path): void
     {
-        static::$styles[$name] = $path;
+        static::$styles[$name] = self::localAsset($path, 'css');
     }
 
     /**
@@ -202,6 +201,24 @@ class Registry
     public static function styleFor(string $name): ?string
     {
         return static::$styles[$name] ?? null;
+    }
+
+    /**
+     * Resolve an installed, compiled asset once at registration time.
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function localAsset(string $path, string $extension): string
+    {
+        $resolved = realpath($path);
+        if ($resolved === false || ! is_file($resolved)) {
+            throw new InvalidArgumentException("Module {$extension} asset '{$path}' must be an existing local file.");
+        }
+        if (strtolower(pathinfo($resolved, PATHINFO_EXTENSION)) !== $extension) {
+            throw new InvalidArgumentException("Module asset '{$path}' must be a .{$extension} file.");
+        }
+
+        return $resolved;
     }
 
     /**
