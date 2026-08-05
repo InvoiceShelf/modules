@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace InvoiceShelf\Modules\Tests;
 
 use InvalidArgumentException;
+use InvoiceShelf\Modules\Ai\Contracts\AiDriver;
+use InvoiceShelf\Modules\Ai\Data\AiChatResponse;
 use InvoiceShelf\Modules\Registry;
 use InvoiceShelf\Modules\Settings\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -308,14 +310,16 @@ class RegistryTest extends TestCase
         Registry::flushDrivers();
 
         Registry::registerAiDriver('fake_ai_provider', [
-            'class' => 'FakeAiDriver',
+            'class' => FakeAiDriver::class,
             'label' => 'fake.ai.label',
             'supported_roles' => ['chat', 'text_generation'],
+            'suggested_models' => [['value' => 'fake-model', 'label' => 'Fake model']],
+            'config_fields' => [],
         ]);
 
         $meta = Registry::driverMeta('ai', 'fake_ai_provider');
         $this->assertNotNull($meta);
-        $this->assertSame('FakeAiDriver', $meta['class']);
+        $this->assertSame(FakeAiDriver::class, $meta['class']);
         $this->assertSame(['chat', 'text_generation'], $meta['supported_roles']);
     }
 
@@ -324,10 +328,93 @@ class RegistryTest extends TestCase
         Registry::flushDrivers();
 
         Registry::registerExchangeRateDriver('shared_name', ['class' => 'RateDriver', 'label' => 'rate']);
-        Registry::registerAiDriver('shared_name', ['class' => 'AiDriver',   'label' => 'ai']);
+        Registry::registerAiDriver('shared_name', $this->aiMeta());
 
         $this->assertSame('RateDriver', Registry::driverMeta('exchange_rate', 'shared_name')['class']);
-        $this->assertSame('AiDriver', Registry::driverMeta('ai', 'shared_name')['class']);
+        $this->assertSame(FakeAiDriver::class, Registry::driverMeta('ai', 'shared_name')['class']);
+    }
+
+    public function test_ai_driver_rejects_duplicate_identifiers_without_replacing_the_first_registration(): void
+    {
+        Registry::flushDrivers();
+        Registry::registerAiDriver('fake', $this->aiMeta());
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('already registered');
+
+        Registry::registerAiDriver('fake', $this->aiMeta(['label' => 'replacement']));
+    }
+
+    public function test_ai_driver_registration_is_idempotent_for_identical_metadata(): void
+    {
+        Registry::flushDrivers();
+        Registry::registerAiDriver('fake', $this->aiMeta());
+        Registry::registerAiDriver('fake', $this->aiMeta());
+
+        $this->assertSame($this->aiMeta(), Registry::driverMeta('ai', 'fake'));
+    }
+
+    public function test_generic_driver_registration_remains_permissive_and_can_replace_a_driver(): void
+    {
+        Registry::flushDrivers();
+        Registry::registerDriver('pdf', 'same', ['label' => 'first']);
+        Registry::registerDriver('pdf', 'same', ['label' => 'second']);
+
+        $this->assertSame(['label' => 'second'], Registry::driverMeta('pdf', 'same'));
+    }
+
+    #[DataProvider('invalidAiDriverRegistrations')]
+    public function test_ai_driver_rejects_malformed_metadata(string $name, array $meta, string $message): void
+    {
+        Registry::flushDrivers();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Registry::registerAiDriver($name, $meta);
+    }
+
+    /** @return iterable<string, array{string, array<string, mixed>, string}> */
+    public static function invalidAiDriverRegistrations(): iterable
+    {
+        $valid = self::validAiMeta();
+
+        yield 'blank identifier' => ['', $valid, 'stable, non-empty identifier'];
+        yield 'unstable identifier' => ['not a driver', $valid, 'stable, non-empty identifier'];
+        yield 'missing class' => ['fake', array_diff_key($valid, ['class' => true]), 'concrete class extending'];
+        yield 'non-driver class' => ['fake', array_replace($valid, ['class' => self::class]), 'concrete class extending'];
+        yield 'abstract driver class' => ['fake', array_replace($valid, ['class' => AbstractFakeAiDriver::class]), 'concrete class extending'];
+        yield 'blank label' => ['fake', array_replace($valid, ['label' => ' ']), 'label must be a non-empty string'];
+        yield 'empty roles' => ['fake', array_replace($valid, ['supported_roles' => []]), 'supported_roles must be a non-empty unique list'];
+        yield 'duplicate roles' => ['fake', array_replace($valid, ['supported_roles' => ['chat', 'chat']]), 'supported_roles must be a non-empty unique list'];
+        yield 'unsupported role' => ['fake', array_replace($valid, ['supported_roles' => ['images']]), 'supported_roles must be a non-empty unique list'];
+        yield 'non-list roles' => ['fake', array_replace($valid, ['supported_roles' => ['role' => 'chat']]), 'supported_roles must be a non-empty unique list'];
+        yield 'invalid website' => ['fake', array_replace($valid, ['website' => 1]), 'website must be a string'];
+        yield 'invalid default base URL' => ['fake', array_replace($valid, ['default_base_url' => []]), 'default_base_url must be a string'];
+        yield 'missing suggested models' => ['fake', array_diff_key($valid, ['suggested_models' => true]), 'suggested_models must be a list'];
+        yield 'non-list suggested models' => ['fake', array_replace($valid, ['suggested_models' => ['model' => ['value' => 'm', 'label' => 'M']]]), 'suggested_models must be a list'];
+        yield 'model with an empty value' => ['fake', array_replace($valid, ['suggested_models' => [['value' => '', 'label' => 'M']]]), 'non-empty string value and label'];
+        yield 'model with an unknown field' => ['fake', array_replace($valid, ['suggested_models' => [['value' => 'm', 'label' => 'M', 'id' => 'm']]]), 'non-empty string value and label'];
+        yield 'missing config fields' => ['fake', array_diff_key($valid, ['config_fields' => true]), 'config_fields must be an array'];
+        yield 'invalid config fields' => ['fake', array_replace($valid, ['config_fields' => 'not-an-array']), 'config_fields must be an array'];
+    }
+
+    /** @param array<string, mixed> $changes @return array<string, mixed> */
+    private function aiMeta(array $changes = []): array
+    {
+        return array_replace(self::validAiMeta(), $changes);
+    }
+
+    /** @return array<string, mixed> */
+    private static function validAiMeta(): array
+    {
+        return [
+            'class' => FakeAiDriver::class,
+            'label' => 'fake.ai.label',
+            'supported_roles' => ['chat', 'text_generation'],
+            'suggested_models' => [['value' => 'fake-model', 'label' => 'Fake model']],
+            'config_fields' => [],
+        ];
     }
 
     public function test_all_drivers_returns_empty_array_for_unknown_type(): void
@@ -368,3 +455,23 @@ class RegistryTest extends TestCase
         $this->assertSame([], Registry::allDrivers('exchange_rate'));
     }
 }
+
+class FakeAiDriver extends AiDriver
+{
+    public function chatCompletion(array $messages, string $model, array $tools = [], array $options = []): AiChatResponse
+    {
+        return new AiChatResponse('ok');
+    }
+
+    public function textCompletion(string $prompt, string $model, array $options = []): string
+    {
+        return 'ok';
+    }
+
+    public function validateConnection(): array
+    {
+        return [];
+    }
+}
+
+abstract class AbstractFakeAiDriver extends AiDriver {}

@@ -10,6 +10,9 @@ The SDK remains MIT. Official first-party modules are separate repositories and 
   - A sidebar entry (title, link, icon) that the host app renders in the company sidebar's "Modules" group.
   - A settings schema (sections of typed fields) that the host app renders generically as a form via `BaseSchemaForm.vue`, with values stored per-company.
 - **`InvoiceShelf\Modules\Settings\Schema` / `FieldType`** — a value object + enum that lock down the supported field types (`text`, `password`, `textarea`, `switch`, `number`, `select`, `multiselect`) and validate the schema shape at registration time.
+- **`InvoiceShelf\Modules\Ai`** — framework-neutral AI provider contracts for module drivers: extend `Ai\Contracts\AiDriver`, return `Ai\Data\AiChatResponse` from chat completions, and throw `Ai\Exceptions\AiException` for provider failures.
+- **`InvoiceShelf\Modules\Contracts\Host`** — host boundaries for global/company settings, company-scoped authorization, and the AI assistant's twelve read-only company-data queries. These expose only scalar values and arrays, never Laravel or application models.
+- **`frontend/index.d.ts`** — the versioned TypeScript contract for module-contributed UI surfaces, authenticated HTTP access, translations, notifications, and host lifecycle events. Module builds consume it as a type-only dependency from the Composer-installed SDK.
 
 The actual module loading, file generation, migration, and provider registration are all handled by upstream `nwidart/laravel-modules` (required as a composer dependency).
 
@@ -36,7 +39,7 @@ An official module lives in its own repository and Composer package — never in
   "requires": {},
   "compatibility": {
     "invoiceshelf": "^3.0.0",
-    "module_api": "^1.1.0",
+    "module_api": "^1.2.0",
     "php": "^8.3.0",
     "extensions": ["ext-json"]
   },
@@ -69,6 +72,16 @@ final class SalesTaxUsCleanup implements DataCleanup
 `cleanup()` must be idempotent because uninstall may be retried; an exception signals failure and must stop the uninstall. Its body may intentionally be empty for a no-op cleanup, but its class must be concrete and its method must be a non-static, non-abstract, zero-argument public `cleanup(): void` implementation. During uninstall, the host calls this developer cleanup first while module tables still exist, then runs every migration's `down()` method, and finally removes host-owned module settings. The scaffold uses its generated service provider as the default cleanup class purely for convenience. Modules may instead point `uninstall.data_cleanup` to a dedicated class in their own namespace.
 
 At runtime, `Registry::registerScript()` and `Registry::registerStyle()` accept only existing local `.js` and `.css` files (for example `module_path($name, 'dist/module.js')`). The registry stores the canonical real path and rejects URLs, missing files, and incorrect extensions; modules cannot inject remote scripts or styles.
+
+## AI module contracts
+
+AI drivers are SDK contracts, not `App\Platform` contracts. A module driver extends `InvoiceShelf\Modules\Ai\Contracts\AiDriver`; its constructor receives an API key and provider configuration, it implements chat completion, text completion, and connection validation, and it may override `listModels()`. Chat completions return `InvoiceShelf\Modules\Ai\Data\AiChatResponse`; provider failures use `InvoiceShelf\Modules\Ai\Exceptions\AiException`, whose `errorKey` is safe for the host UI to localize.
+
+Register a driver with `Registry::registerAiDriver()`. The identifier is stable and unique among AI drivers. Metadata requires a concrete SDK `AiDriver` class, a non-empty label, a non-empty unique `supported_roles` list (`chat` and/or `text_generation`), a list of `{value, label}` suggested models, and a `config_fields` array. `website` and `default_base_url` are optional strings. Generic `registerDriver()` retains its existing permissive behavior for non-AI driver categories.
+
+Modules that need host data depend on the narrow interfaces under `InvoiceShelf\Modules\Contracts\Host`: `SettingsStore` has global and per-company get/put/delete operations plus a cleanup-only operation that removes one key from every company, `ModuleAuthorization` evaluates a user/company ability against the stable `customer`, `invoice`, `expense`, `payment`, or `item` resource string (or `null` for dashboard-like abilities), and `CompanyDataReader` covers the assistant's twelve current read-only query use cases. The host owns the implementations and binds them; modules must not import application models or Laravel collections through these interfaces.
+
+Frontend modules import `InvoiceShelfExtensionApi` and its contribution types from the Composer-installed `frontend/index.d.ts` as a type-only build dependency. The host passes that API as the third argument to `window.InvoiceShelf.booting()`. Runtime contributions remain on the host's Vue, router, Axios, i18n, and notification instances; the declaration file does not bundle a second frontend framework runtime.
 
 ## Signed releases
 

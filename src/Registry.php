@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace InvoiceShelf\Modules;
 
 use InvalidArgumentException;
+use InvoiceShelf\Modules\Ai\Contracts\AiDriver;
 use InvoiceShelf\Modules\Settings\Schema;
 
 /**
@@ -267,11 +268,74 @@ class Registry
      *         ],
      *     ]);
      *
-     * @param  array<string, mixed>  $meta
+     * @param  array{class: class-string<AiDriver>, label: string, supported_roles: non-empty-list<'chat'|'text_generation'>, suggested_models: list<array{value: string, label: string}>, config_fields: array<mixed>, website?: string, default_base_url?: string}  $meta
      */
     public static function registerAiDriver(string $name, array $meta): void
     {
+        self::validateAiDriver($name, $meta);
+
+        if ((static::$drivers['ai'][$name] ?? null) === $meta) {
+            return;
+        }
+
+        if (isset(static::$drivers['ai'][$name])) {
+            throw new InvalidArgumentException("AI driver '{$name}' is already registered.");
+        }
+
         static::registerDriver('ai', $name, $meta);
+    }
+
+    /**
+     * @param  array<string, mixed>  $meta
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function validateAiDriver(string $name, array $meta): void
+    {
+        if (! preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $name)) {
+            throw new InvalidArgumentException('AI driver name must be a stable, non-empty identifier using letters, numbers, dots, underscores, or hyphens.');
+        }
+
+        $class = $meta['class'] ?? null;
+        if (! is_string($class) || ! class_exists($class) || ! is_subclass_of($class, AiDriver::class) || (new \ReflectionClass($class))->isAbstract()) {
+            throw new InvalidArgumentException('AI driver class must be a concrete class extending '.AiDriver::class.'.');
+        }
+
+        if (! is_string($meta['label'] ?? null) || trim($meta['label']) === '') {
+            throw new InvalidArgumentException('AI driver label must be a non-empty string.');
+        }
+
+        $roles = $meta['supported_roles'] ?? null;
+        if (! is_array($roles) || ! array_is_list($roles) || $roles === [] || count($roles) !== count(array_unique($roles, SORT_REGULAR))) {
+            throw new InvalidArgumentException("AI driver supported_roles must be a non-empty unique list containing only 'chat' and 'text_generation'.");
+        }
+        foreach ($roles as $role) {
+            if (! is_string($role) || ! in_array($role, ['chat', 'text_generation'], true)) {
+                throw new InvalidArgumentException("AI driver supported_roles must be a non-empty unique list containing only 'chat' and 'text_generation'.");
+            }
+        }
+
+        foreach (['website', 'default_base_url'] as $field) {
+            if (array_key_exists($field, $meta) && ! is_string($meta[$field])) {
+                throw new InvalidArgumentException("AI driver {$field} must be a string when provided.");
+            }
+        }
+
+        $models = $meta['suggested_models'] ?? null;
+        if (! is_array($models) || ! array_is_list($models)) {
+            throw new InvalidArgumentException('AI driver suggested_models must be a list of {value, label} entries.');
+        }
+        foreach ($models as $model) {
+            if (! is_array($model) || count($model) !== 2 || ! array_key_exists('value', $model) || ! array_key_exists('label', $model)
+                || ! is_string($model['value']) || trim($model['value']) === ''
+                || ! is_string($model['label']) || trim($model['label']) === '') {
+                throw new InvalidArgumentException('Each AI driver suggested_models entry must contain non-empty string value and label fields only.');
+            }
+        }
+
+        if (! is_array($meta['config_fields'] ?? null)) {
+            throw new InvalidArgumentException('AI driver config_fields must be an array.');
+        }
     }
 
     /**
