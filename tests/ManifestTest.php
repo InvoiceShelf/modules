@@ -6,6 +6,8 @@ namespace InvoiceShelf\Modules\Tests;
 
 use InvalidArgumentException;
 use InvoiceShelf\Modules\Manifest\CanonicalJson;
+use InvoiceShelf\Modules\Manifest\CleanupValidator;
+use InvoiceShelf\Modules\Manifest\MigrationValidator;
 use InvoiceShelf\Modules\Manifest\ModuleManifest;
 use InvoiceShelf\Modules\Manifest\PackageValidator;
 use InvoiceShelf\Modules\Manifest\ReleaseEnvelope;
@@ -26,7 +28,7 @@ class ManifestTest extends TestCase
         $this->assertSame('AGPL-3.0-only', $stub['license']);
         $this->assertSame('^8.3', $stub['require']['php']);
         $this->assertSame('*', $stub['require']['ext-json']);
-        $this->assertSame('^3.1', $stub['require']['invoiceshelf/modules']);
+        $this->assertSame('^3.2', $stub['require']['invoiceshelf/modules']);
         $this->assertSame('^11.0', $stub['require-dev']['orchestra/testbench']);
         $this->assertSame('^12.0', $stub['require-dev']['phpunit/phpunit']);
         $this->assertSame('vendor/bin/pint --test', $stub['scripts']['lint']);
@@ -38,6 +40,23 @@ class ManifestTest extends TestCase
 
         $this->assertIsArray($replacements);
         $this->assertContains('KEBAB_NAME', $replacements);
+    }
+
+    public function test_schema_v2_stubs_declare_a_compatible_cleanup_provider(): void
+    {
+        $json = file_get_contents(dirname(__DIR__).'/stubs/json.stub');
+        $provider = file_get_contents(dirname(__DIR__).'/stubs/scaffold/provider.stub');
+
+        $this->assertIsString($json);
+        $this->assertIsString($provider);
+
+        $stub = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(2, $stub['schema_version']);
+        $this->assertSame('^1.1.0', $stub['compatibility']['module_api']);
+        $this->assertSame('reversible', $stub['migration_policy']);
+        $this->assertSame('$MODULE_NAMESPACE$\\$STUDLY_NAME$\\Providers\\$STUDLY_NAME$ServiceProvider', $stub['uninstall']['data_cleanup']);
+        $this->assertStringContainsString('implements DataCleanup', $provider);
+        $this->assertStringContainsString('function cleanup(): void', $provider);
     }
 
     public function test_valid_module_manifest_is_normalized(): void
@@ -61,6 +80,15 @@ class ManifestTest extends TestCase
         $this->assertSame('^3.0', ModuleManifest::fromArray($manifest)->compatibility->invoiceshelf);
     }
 
+    public function test_schema_v2_module_manifest_requires_reversible_migrations_and_a_data_cleanup_class(): void
+    {
+        $manifest = ModuleManifest::fromArray($this->reversibleModuleManifest());
+
+        $this->assertSame('reversible', $manifest->migrationPolicy);
+        $this->assertSame('Modules\\SalesTaxUs\\Providers\\SalesTaxUsServiceProvider', $manifest->uninstall?->dataCleanup);
+        $this->assertSame($this->reversibleModuleManifest(), $manifest->toArray());
+    }
+
     #[DataProvider('invalidModuleManifests')]
     public function test_invalid_module_contracts_are_rejected(string $message, array $changes): void
     {
@@ -73,7 +101,7 @@ class ManifestTest extends TestCase
     /** @return iterable<string, array{string, array<string, mixed>}> */
     public static function invalidModuleManifests(): iterable
     {
-        yield 'unsupported schema' => ['schema_version=1', ['schema_version' => 2]];
+        yield 'unsupported schema' => ['schema_version=1 or schema_version=2', ['schema_version' => 3]];
         yield 'bad slug' => ['lowercase kebab-case', ['slug' => 'Sales Tax']];
         yield 'bad module name' => ['PascalCase', ['name' => 'sales_tax_us']];
         yield 'bad version' => ['SemVer', ['version' => 'v1.0']];
@@ -83,11 +111,30 @@ class ManifestTest extends TestCase
         yield 'bad extension' => ['ext-name', ['compatibility' => ['extensions' => ['json']]]];
         yield 'bad module dependency' => ['another lowercase kebab-case', ['module_dependencies' => ['sales-tax-us' => '^1.0.0']]];
         yield 'bad dependency range' => ['supported SemVer constraint', ['module_dependencies' => ['other-module' => 'dev-main']]];
-        yield 'rollback migration policy' => ['forward-only', ['migration_policy' => 'reversible']];
+        yield 'legacy rollback migration policy' => ['schema_version=1 requires migration_policy', ['migration_policy' => 'reversible']];
         yield 'runtime dependency policy' => ['host-provided-only', ['dependency_policy' => 'composer-install']];
         yield 'remote asset' => ['local dist', ['assets' => ['https://cdn.example.test/module.js']]];
         yield 'source asset' => ['local dist', ['assets' => ['resources/module.ts']]];
         yield 'unknown key' => ['unsupported field', ['composer_dependencies' => []]];
+    }
+
+    #[DataProvider('invalidSchemaV2ModuleManifests')]
+    public function test_invalid_schema_v2_module_contracts_are_rejected(string $message, array $changes): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        ModuleManifest::fromArray(array_replace_recursive($this->reversibleModuleManifest(), $changes));
+    }
+
+    /** @return iterable<string, array{string, array<string, mixed>}> */
+    public static function invalidSchemaV2ModuleManifests(): iterable
+    {
+        yield 'forward only v2 policy' => ['schema_version=2 requires migration_policy', ['migration_policy' => 'forward-only']];
+        yield 'missing uninstall contract' => ["must declare an 'uninstall' object", ['uninstall' => null]];
+        yield 'missing data cleanup class' => ['data_cleanup', ['uninstall' => ['data_cleanup' => '']]];
+        yield 'data cleanup outside module namespace' => ['Modules\\SalesTaxUs namespace', ['uninstall' => ['data_cleanup' => 'App\\Cleanup']]];
+        yield 'unknown uninstall key' => ['uninstall contract contains unsupported field', ['uninstall' => ['data_cleanup' => 'Modules\\SalesTaxUs\\Cleanup', 'command' => 'rm -rf']]];
     }
 
     public function test_canonical_json_sorts_objects_and_preserves_lists_exactly(): void
@@ -114,13 +161,15 @@ class ManifestTest extends TestCase
         ));
     }
 
-    public function test_package_validator_requires_built_assets_and_host_provided_composer_dependencies(): void
+    public function test_package_validator_requires_built_assets_host_provided_composer_dependencies_and_reversible_migrations(): void
     {
         $directory = sys_get_temp_dir().'/invoiceshelf-modules-'.bin2hex(random_bytes(8));
         mkdir($directory.'/dist', 0700, true);
 
         try {
-            file_put_contents($directory.'/module.json', json_encode($this->moduleManifest(), JSON_THROW_ON_ERROR));
+            mkdir($directory.'/database/migrations', 0700, true);
+            mkdir($directory.'/app/Providers', 0700, true);
+            file_put_contents($directory.'/module.json', json_encode($this->reversibleModuleManifest(), JSON_THROW_ON_ERROR));
             file_put_contents($directory.'/composer.json', json_encode([
                 'name' => 'invoiceshelf/module-sales-tax-us',
                 'license' => 'AGPL-3.0-only',
@@ -128,6 +177,8 @@ class ManifestTest extends TestCase
             ], JSON_THROW_ON_ERROR));
             file_put_contents($directory.'/dist/module.js', 'built javascript');
             file_put_contents($directory.'/dist/module.css', 'built css');
+            file_put_contents($directory.'/database/migrations/2026_01_01_000000_create_rates_table.php', $this->validMigration());
+            file_put_contents($directory.'/app/Providers/SalesTaxUsServiceProvider.php', $this->validCleanupProvider());
 
             $this->assertSame('sales-tax-us', PackageValidator::validate($directory)->slug);
 
@@ -154,7 +205,7 @@ class ManifestTest extends TestCase
             $this->expectExceptionMessage('missing');
             PackageValidator::validate($directory);
         } finally {
-            foreach (['module.json', 'composer.json', 'dist/module.js', 'dist/module.css'] as $file) {
+            foreach (['module.json', 'composer.json', 'dist/module.js', 'dist/module.css', 'database/migrations/2026_01_01_000000_create_rates_table.php', 'app/Providers/SalesTaxUsServiceProvider.php'] as $file) {
                 if (is_file($directory.'/'.$file)) {
                     unlink($directory.'/'.$file);
                 }
@@ -162,10 +213,253 @@ class ManifestTest extends TestCase
             if (is_dir($directory.'/dist')) {
                 rmdir($directory.'/dist');
             }
+            if (is_dir($directory.'/database/migrations')) {
+                rmdir($directory.'/database/migrations');
+            }
+            if (is_dir($directory.'/database')) {
+                rmdir($directory.'/database');
+            }
+            if (is_dir($directory.'/app/Providers')) {
+                rmdir($directory.'/app/Providers');
+            }
+            if (is_dir($directory.'/app')) {
+                rmdir($directory.'/app');
+            }
             if (is_dir($directory)) {
                 rmdir($directory);
             }
         }
+    }
+
+    #[DataProvider('invalidMigrations')]
+    public function test_reversible_migrations_must_have_public_non_empty_up_and_down_methods(string $source, string $message): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'invoiceshelf-module-migration-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, $source);
+
+        try {
+            $this->expectException(InvalidArgumentException::class);
+            $this->expectExceptionMessage($message);
+            MigrationValidator::validateFile($path);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function invalidMigrations(): iterable
+    {
+        yield 'missing down' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { $value = 1; } };
+PHP,
+            'down(): void',
+        ];
+        yield 'protected up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { protected function up(): void { $value = 1; } public function down(): void { $value = 1; } };
+PHP,
+            'up(): void',
+        ];
+        yield 'empty down' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { $value = 1; } public function down(): void {} };
+PHP,
+            'down(): void',
+        ];
+        yield 'drop table in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { Schema::dropIfExists('rates'); } public function down(): void { Schema::create('rates', fn () => null); } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'update data in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { DB::table('rates')->update(['active' => false]); } public function down(): void { $value = 1; } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'rename in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { Schema::rename('old', 'new'); } public function down(): void { $value = 1; } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'raw function in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { raw('delete from rates'); } public function down(): void { $value = 1; } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'unprepared in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { DB::unprepared('delete from rates'); } public function down(): void { $value = 1; } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'statement in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { DB::statement('delete from rates'); } public function down(): void { $value = 1; } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'affecting statement in up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { DB::affectingStatement('delete from rates'); } public function down(): void { $value = 1; } };
+PHP,
+            'Destructive calls are allowed only in down()',
+        ];
+        yield 'static up' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public static function up(): void { $value = 1; } public function down(): void { $value = 1; } };
+PHP,
+            'up(): void',
+        ];
+        yield 'up with argument' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(string $table): void { $value = 1; } public function down(): void { $value = 1; } };
+PHP,
+            'up(): void',
+        ];
+        yield 'non-void down' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { $value = 1; } public function down(): bool { return true; } };
+PHP,
+            'down(): void',
+        ];
+        yield 'multiple migration classes' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+return new class extends Migration { public function up(): void { $value = 1; } public function down(): void { $value = 1; } };
+class AnotherMigration extends Migration { public function up(): void { $value = 1; } public function down(): void { $value = 1; } }
+PHP,
+            'exactly one concrete Laravel migration class',
+        ];
+        yield 'not a Laravel migration' => [
+            <<<'PHP'
+<?php
+return new class { public function up(): void { $value = 1; } public function down(): void { $value = 1; } };
+PHP,
+            'must extend Illuminate\\Database\\Migrations\\Migration',
+        ];
+        yield 'abstract migration' => [
+            <<<'PHP'
+<?php
+use Illuminate\Database\Migrations\Migration;
+abstract class SalesTaxMigration extends Migration { public function up(): void { $value = 1; } public function down(): void { $value = 1; } }
+PHP,
+            'and be concrete',
+        ];
+    }
+
+    public function test_reversible_migrations_allow_destructive_calls_in_down(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'invoiceshelf-module-migration-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, $this->validMigration());
+
+        try {
+            MigrationValidator::validateFile($path);
+            $this->addToAssertionCount(1);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    #[DataProvider('invalidCleanupProviders')]
+    public function test_cleanup_class_must_be_concrete_and_implement_the_public_contract(string $source, string $message): void
+    {
+        $directory = sys_get_temp_dir().'/invoiceshelf-modules-cleanup-'.bin2hex(random_bytes(8));
+        mkdir($directory.'/app/Providers', 0700, true);
+        file_put_contents($directory.'/app/Providers/SalesTaxUsServiceProvider.php', $source);
+
+        try {
+            $this->expectException(InvalidArgumentException::class);
+            $this->expectExceptionMessage($message);
+            CleanupValidator::validateDirectory($directory, 'Modules\\SalesTaxUs\\Providers\\SalesTaxUsServiceProvider');
+        } finally {
+            unlink($directory.'/app/Providers/SalesTaxUsServiceProvider.php');
+            rmdir($directory.'/app/Providers');
+            rmdir($directory.'/app');
+            rmdir($directory);
+        }
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function invalidCleanupProviders(): iterable
+    {
+        yield 'missing interface' => [
+            <<<'PHP'
+<?php
+namespace Modules\SalesTaxUs\Providers;
+final class SalesTaxUsServiceProvider { public function cleanup(): void {} }
+PHP,
+            'must implement',
+        ];
+        yield 'abstract class' => [
+            <<<'PHP'
+<?php
+namespace Modules\SalesTaxUs\Providers;
+use InvoiceShelf\Modules\Contracts\DataCleanup;
+abstract class SalesTaxUsServiceProvider implements DataCleanup { public function cleanup(): void {} }
+PHP,
+            'must not be abstract',
+        ];
+        yield 'abstract cleanup method' => [
+            <<<'PHP'
+<?php
+namespace Modules\SalesTaxUs\Providers;
+use InvoiceShelf\Modules\Contracts\DataCleanup;
+abstract class SalesTaxUsServiceProvider implements DataCleanup { abstract public function cleanup(): void; }
+PHP,
+            'concrete public zero-argument cleanup(): void',
+        ];
+        yield 'static cleanup method' => [
+            <<<'PHP'
+<?php
+namespace Modules\SalesTaxUs\Providers;
+use InvoiceShelf\Modules\Contracts\DataCleanup;
+final class SalesTaxUsServiceProvider implements DataCleanup { public static function cleanup(): void {} }
+PHP,
+            'concrete public zero-argument cleanup(): void',
+        ];
+        yield 'cleanup with argument' => [
+            <<<'PHP'
+<?php
+namespace Modules\SalesTaxUs\Providers;
+use InvoiceShelf\Modules\Contracts\DataCleanup;
+final class SalesTaxUsServiceProvider implements DataCleanup { public function cleanup(string $scope): void {} }
+PHP,
+            'concrete public zero-argument cleanup(): void',
+        ];
     }
 
     public function test_valid_stable_release_has_deterministic_canonical_form(): void
@@ -355,6 +649,56 @@ class ManifestTest extends TestCase
             'dependency_policy' => 'host-provided-only',
             'assets' => ['dist/module.js', 'dist/module.css'],
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function reversibleModuleManifest(): array
+    {
+        return [
+            ...$this->moduleManifest(),
+            'schema_version' => 2,
+            'migration_policy' => 'reversible',
+            'uninstall' => [
+                'data_cleanup' => 'Modules\\SalesTaxUs\\Providers\\SalesTaxUsServiceProvider',
+            ],
+        ];
+    }
+
+    private function validMigration(): string
+    {
+        return <<<'PHP'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Schema::create('rates', function (): void {});
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('rates');
+    }
+};
+PHP;
+    }
+
+    private function validCleanupProvider(): string
+    {
+        return <<<'PHP'
+<?php
+
+namespace Modules\SalesTaxUs\Providers;
+
+use InvoiceShelf\Modules\Contracts\DataCleanup;
+
+final class SalesTaxUsServiceProvider implements DataCleanup
+{
+    public function cleanup(): void {}
+}
+PHP;
     }
 
     /** @return array<string, mixed> */

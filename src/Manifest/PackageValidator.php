@@ -32,6 +32,15 @@ final class PackageValidator
 
         self::validateComposer($root.'/composer.json', $module->slug);
 
+        if ($module->uninstall !== null) {
+            CleanupValidator::validateDirectory($root, $module->uninstall->dataCleanup);
+        }
+
+        if ($module->migrationPolicy === 'reversible') {
+            MigrationValidator::validateDirectory($root.'/database/migrations');
+            MigrationValidator::validateDirectory($root.'/Database/Migrations');
+        }
+
         return $module;
     }
 
