@@ -1,0 +1,55 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use InvoiceShelf\Modules\Manifest\ManifestValidator;
+use InvoiceShelf\Modules\Manifest\SigningKeyPairGenerator;
+
+require dirname(__DIR__).'/vendor/autoload.php';
+
+[$command, $target] = array_pad(array_slice($argv, 1), 2, null);
+
+if (! in_array($command, ['validate-module', 'validate-package', 'validate-release', 'canonicalize-release', 'generate-keypair'], true) || ! is_string($target)) {
+    fwrite(STDERR, "Usage: invoiceshelf-module <validate-module|validate-package|validate-release|canonicalize-release> <path>\n");
+    fwrite(STDERR, "       invoiceshelf-module generate-keypair <key-id>\n");
+    exit(64);
+}
+
+try {
+    if ($command === 'generate-keypair') {
+        $keypair = SigningKeyPairGenerator::generate($target);
+        fwrite(STDOUT, json_encode($keypair, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
+        fwrite(STDERR, "Store secret_key_b64 only as MODULE_SIGNING_SECRET_KEY_B64 in a protected GitHub environment; add public_key_b64 under key_id to website and InvoiceShelf public-key configuration. Do not commit either output.\n");
+        exit(0);
+    }
+
+    if ($command === 'validate-package') {
+        ManifestValidator::package($target);
+        fwrite(STDOUT, "Valid {$command}: {$target}\n");
+        exit(0);
+    }
+
+    $contents = $target === '-' ? stream_get_contents(STDIN) : file_get_contents($target);
+    if ($contents === false) {
+        throw new RuntimeException("Cannot read {$target}.");
+    }
+    $manifest = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+    if (! is_array($manifest) || array_is_list($manifest)) {
+        throw new RuntimeException('Manifest root must be a JSON object.');
+    }
+
+    if ($command === 'validate-module') {
+        ManifestValidator::module($manifest);
+    } elseif ($command === 'validate-release') {
+        ManifestValidator::release($manifest);
+    } else {
+        fwrite(STDOUT, ManifestValidator::canonicalRelease($manifest));
+        exit(0);
+    }
+
+    fwrite(STDOUT, "Valid {$command} manifest: {$target}\n");
+} catch (Throwable $exception) {
+    fwrite(STDERR, "Invalid manifest: {$exception->getMessage()}\n");
+    exit(1);
+}

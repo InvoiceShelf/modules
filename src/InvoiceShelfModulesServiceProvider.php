@@ -55,5 +55,11 @@ class InvoiceShelfModulesServiceProvider extends ServiceProvider
         if (is_dir($stubsPath)) {
             Stub::setBasePath($stubsPath);
         }
+
+        $composerReplacements = $this->app['config']->get('modules.stubs.replacements.composer', []);
+        if (is_array($composerReplacements) && ! in_array('KEBAB_NAME', $composerReplacements, true)) {
+            $composerReplacements[] = 'KEBAB_NAME';
+            $this->app['config']->set('modules.stubs.replacements.composer', $composerReplacements);
+        }
     }
 }

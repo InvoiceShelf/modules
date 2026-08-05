@@ -1,0 +1,176 @@
+name: Module release
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: stable releases require a final SemVer; insider releases require a prerelease SemVer
+        required: true
+        type: string
+      artifact-name:
+        description: Name for the deterministic module ZIP
+        required: false
+        default: module.zip
+        type: string
+    secrets:
+      MODULE_SIGNING_SECRET_KEY_B64:
+        required: true
+      MODULE_MARKETPLACE_INGEST_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options: [stable, insider]
+      artifact-name:
+        description: Name for the deterministic module ZIP
+        required: true
+        default: module.zip
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: module-release
+    env:
+      MODULE_CHANNEL: ${{ inputs.channel }}
+      MODULE_ARTIFACT_NAME: ${{ inputs['artifact-name'] || 'module.zip' }}
+      MODULE_SIGNING_KEY_ID: ${{ vars.MODULE_SIGNING_KEY_ID }}
+      MODULE_MARKETPLACE_INGEST_URL: ${{ vars.MODULE_MARKETPLACE_INGEST_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag matches module version
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          version="$(jq -er '.version | strings' module.json)"
+          if [ "$GITHUB_REF_NAME" != "$version" ]; then
+            echo "Tag '$GITHUB_REF_NAME' must exactly match module.json version '$version'." >&2
+            exit 1
+          fi
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sodium
+          coverage: none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and verify source
+        run: |
+          composer install --no-interaction --prefer-dist
+          composer run lint
+          composer run test
+          if [ -f package.json ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+            pnpm run build
+          fi
+          vendor/bin/invoiceshelf-module validate-module module.json
+          vendor/bin/invoiceshelf-module validate-package .
+          jq -r '.assets[]' module.json | while IFS= read -r asset; do
+            test -f "$asset"
+          done
+
+      - name: Build deterministic artifact
+        run: |
+          set -euo pipefail
+          case "$MODULE_ARTIFACT_NAME" in
+            [A-Za-z0-9]*.zip) ;;
+            *) echo 'MODULE_ARTIFACT_NAME must be a safe basename ending in .zip.' >&2; exit 1 ;;
+          esac
+          case "$MODULE_ARTIFACT_NAME" in
+            *[!A-Za-z0-9._-]*) echo 'MODULE_ARTIFACT_NAME contains unsupported characters.' >&2; exit 1 ;;
+          esac
+          source_date_epoch="$(git log -1 --format=%ct)"
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          module_name="$(jq -r '.name' module.json)"
+          test "$module_name" != "null"
+          package="$stage/$module_name"
+          mkdir -p "$package"
+          git archive --format=tar HEAD | tar -xf - -C "$package"
+          if [ -d dist ]; then
+            rm -rf "$package/dist"
+            cp -a dist "$package/dist"
+          fi
+          find "$stage" -exec touch -h -d "@$source_date_epoch" {} +
+          (
+            cd "$stage"
+            find . -type f -print | LC_ALL=C sort | zip -X -q "$GITHUB_WORKSPACE/$MODULE_ARTIFACT_NAME" -@
+          )
+
+      - name: Create, validate, and sign release manifest
+        env:
+          MODULE_SIGNING_SECRET_KEY_B64: ${{ secrets.MODULE_SIGNING_SECRET_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$MODULE_SIGNING_KEY_ID"
+          slug="$(jq -r '.slug' module.json)"
+          version="$(jq -r '.version' module.json)"
+          test "$slug" != "null"
+          test "$version" != "null"
+          sha256="$(sha256sum "$MODULE_ARTIFACT_NAME" | cut -d ' ' -f 1)"
+          bytes="$(wc -c < "$MODULE_ARTIFACT_NAME" | tr -d ' ')"
+          released_at="$(date --utc +'%Y-%m-%dT%H:%M:%SZ')"
+          source_commit="$(git rev-parse HEAD)"
+          jq \
+            --arg channel "$MODULE_CHANNEL" \
+            --arg sha256 "$sha256" \
+            --argjson bytes "$bytes" \
+            --arg key_id "$MODULE_SIGNING_KEY_ID" \
+            --arg source_commit "$source_commit" \
+            --arg released_at "$released_at" \
+            '{schema_version: 1, slug, module_name: .name, version, channel: $channel, publication: "published", compatibility, artifact: {sha256: $sha256, bytes: $bytes}, key_id: $key_id, source_commit: $source_commit, released_at: $released_at}' \
+            module.json > release-manifest.json
+          vendor/bin/invoiceshelf-module validate-release release-manifest.json
+          vendor/bin/invoiceshelf-module canonicalize-release release-manifest.json > release-manifest.canonical.json
+          php -r '
+            $key = base64_decode(getenv("MODULE_SIGNING_SECRET_KEY_B64"), true);
+            if ($key === false || strlen($key) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) { throw new RuntimeException("MODULE_SIGNING_SECRET_KEY_B64 is not a raw Ed25519 secret key."); }
+            echo base64_encode(sodium_crypto_sign_detached(file_get_contents("release-manifest.canonical.json"), $key));
+          ' > release-manifest.sig
+
+      - name: Upload signed release to marketplace ingest
+        env:
+          MODULE_MARKETPLACE_INGEST_TOKEN: ${{ secrets.MODULE_MARKETPLACE_INGEST_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$MODULE_MARKETPLACE_INGEST_URL"
+          slug="$(jq -r '.slug' module.json)"
+          version="$(jq -r '.version' module.json)"
+          case "$MODULE_ARTIFACT_NAME" in
+            [A-Za-z0-9]*.zip) ;;
+            *) echo 'MODULE_ARTIFACT_NAME must be a safe basename ending in .zip.' >&2; exit 1 ;;
+          esac
+          case "$MODULE_ARTIFACT_NAME" in
+            *[!A-Za-z0-9._-]*) echo 'MODULE_ARTIFACT_NAME contains unsupported characters.' >&2; exit 1 ;;
+          esac
+          case "$MODULE_MARKETPLACE_INGEST_URL" in
+            https://*) ;;
+            *) echo 'MODULE_MARKETPLACE_INGEST_URL must use HTTPS.' >&2; exit 1 ;;
+          esac
+          manifest="$(<release-manifest.json)"
+          signature="$(<release-manifest.sig)"
+          curl --fail-with-body --silent --show-error \
+            --request POST "${MODULE_MARKETPLACE_INGEST_URL%/}/$slug/releases" \
+            --header "Authorization: Bearer $MODULE_MARKETPLACE_INGEST_TOKEN" \
+            --form "repository=$GITHUB_REPOSITORY" \
+            --form "version=$version" \
+            --form "channel=$MODULE_CHANNEL" \
+            --form-string "manifest=$manifest" \
+            --form-string "signature=$signature" \
+            --form "key_id=$MODULE_SIGNING_KEY_ID" \
+            --form "artifact=@$MODULE_ARTIFACT_NAME;type=application/zip"

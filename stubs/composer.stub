@@ -1,6 +1,7 @@
 {
-    "name": "$VENDOR$/$LOWER_NAME$",
+    "name": "invoiceshelf/module-$KEBAB_NAME$",
     "description": "",
+    "license": "AGPL-3.0-only",
     "authors": [
         {
             "name": "$AUTHOR_NAME$",
@@ -8,7 +9,14 @@
         }
     ],
     "require": {
-        "invoiceshelf/modules": "^3.0"
+        "php": "^8.3",
+        "ext-json": "*",
+        "invoiceshelf/modules": "^3.1"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.16",
+        "orchestra/testbench": "^11.0",
+        "phpunit/phpunit": "^12.0"
     },
     "extra": {
         "laravel": {
@@ -29,5 +37,9 @@
         "psr-4": {
             "$MODULE_NAMESPACE$\\$STUDLY_NAME$\\Tests\\": "tests/"
         }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "lint": "vendor/bin/pint --test"
     }
 }
