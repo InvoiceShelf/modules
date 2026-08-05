@@ -17,11 +17,11 @@ The actual module loading, file generation, migration, and provider registration
 
 An official module lives in its own repository and Composer package — never in this SDK repository or in the InvoiceShelf application repository. First-party packages use the reserved `invoiceshelf/module-<slug>` convention (the generator's Composer stub uses it automatically); this marketplace contract is for official modules, not a runtime package-install mechanism for arbitrary third-party code. `php artisan module:make` creates the extended `module.json` automatically through this SDK's [`stubs/json.stub`](stubs/json.stub).
 
-`module.json` is schema version 1. Its identity (`slug`, loader `name`) is immutable after the first marketplace release. It preserves nwidart loader keys (`name`, `alias`, `description`, `keywords`, `priority`, `providers`, `aliases`, `files`, and `requires`) and adds an exact SemVer `version`, SPDX `license`, compatibility constraints, required `ext-*` PHP extensions, module-to-module SemVer dependencies, and local compiled `dist/*.js`/`dist/*.css` assets. Unknown fields beyond those defined loader and SDK keys are rejected.
+`module.json` is schema version 2. Its identity (`slug`, loader `name`) is immutable after the first marketplace release. It preserves nwidart loader keys (`name`, `alias`, `description`, `keywords`, `priority`, `providers`, `aliases`, `files`, and `requires`) and adds an exact SemVer `version`, SPDX `license`, compatibility constraints, required `ext-*` PHP extensions, module-to-module SemVer dependencies, local compiled `dist/*.js`/`dist/*.css` assets, and a required uninstall cleanup class. Unknown fields beyond those defined loader and SDK keys are rejected. The SDK continues to parse schema-v1 manifests as legacy forward-only packages; new modules must use schema v2.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "slug": "sales-tax-us",
   "name": "SalesTaxUs",
   "alias": "salestaxus",
@@ -36,18 +36,37 @@ An official module lives in its own repository and Composer package — never in
   "requires": {},
   "compatibility": {
     "invoiceshelf": "^3.0.0",
-    "module_api": "^1.0.0",
+    "module_api": "^1.1.0",
     "php": "^8.3.0",
     "extensions": ["ext-json"]
   },
   "module_dependencies": {"accounting-core": "^1.0.0"},
-  "migration_policy": "forward-only",
+  "migration_policy": "reversible",
   "dependency_policy": "host-provided-only",
+  "uninstall": {
+    "data_cleanup": "Modules\\SalesTaxUs\\Providers\\SalesTaxUsServiceProvider"
+  },
   "assets": ["dist/module.js", "dist/module.css"]
 }
 ```
 
-The policies are deliberately closed: migrations are forward-only and installation never runs Composer, npm, pnpm, or another dependency resolver. Runtime dependencies must be provided by InvoiceShelf (`host-provided-only`). Generated packages use Orchestra Testbench 11 (Laravel 13), PHPUnit 12, and Pint only as `require-dev` CI tooling; build tooling is allowed in CI only, and compiled output is shipped inside the ZIP. Remote URLs, source assets, path traversal, arbitrary PHP providers, unsupported constraints, and unknown manifest fields are rejected.
+The policies are deliberately closed: schema-v2 migrations are reversible and installation never runs Composer, npm, pnpm, or another dependency resolver. Every PHP migration under `database/migrations` (or legacy `Database/Migrations`) must contain exactly one concrete class extending Laravel's `Migration`, with public, non-static, zero-argument, non-empty `up(): void` and `down(): void` methods. The package validator parses those files as PHP ASTs: destructive calls (including `drop*`, `rename*`, `update*`, `raw`, `unprepared`, `statement`, `affectingStatement`, `delete`, and `truncate`) are forbidden in `up()` and allowed in `down()`. Runtime dependencies must be provided by InvoiceShelf (`host-provided-only`). Generated packages use Orchestra Testbench 11 (Laravel 13), PHPUnit 12, and Pint only as `require-dev` CI tooling; build tooling is allowed in CI only, and compiled output is shipped inside the ZIP. Remote URLs, source assets, path traversal, arbitrary PHP providers, unsupported constraints, and unknown manifest fields are rejected.
+
+Schema-v2 manifests must declare `uninstall.data_cleanup` as a class in their own `Modules\\<Name>\\...` namespace. That class must implement `InvoiceShelf\\Modules\\Contracts\\DataCleanup`:
+
+```php
+use InvoiceShelf\Modules\Contracts\DataCleanup;
+
+final class SalesTaxUsCleanup implements DataCleanup
+{
+    public function cleanup(): void
+    {
+        // Delete module-owned external resources or data outside down() migrations.
+    }
+}
+```
+
+`cleanup()` must be idempotent because uninstall may be retried; an exception signals failure and must stop the uninstall. Its body may intentionally be empty for a no-op cleanup, but its class must be concrete and its method must be a non-static, non-abstract, zero-argument public `cleanup(): void` implementation. During uninstall, the host calls this developer cleanup first while module tables still exist, then runs every migration's `down()` method, and finally removes host-owned module settings. The scaffold uses its generated service provider as the default cleanup class purely for convenience. Modules may instead point `uninstall.data_cleanup` to a dedicated class in their own namespace.
 
 At runtime, `Registry::registerScript()` and `Registry::registerStyle()` accept only existing local `.js` and `.css` files (for example `module_path($name, 'dist/module.js')`). The registry stores the canonical real path and rejects URLs, missing files, and incorrect extensions; modules cannot inject remote scripts or styles.
 

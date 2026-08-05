@@ -11,7 +11,7 @@
     "require": {
         "php": "^8.3",
         "ext-json": "*",
-        "invoiceshelf/modules": "^3.1"
+        "invoiceshelf/modules": "^3.2"
     },
     "require-dev": {
         "laravel/pint": "^1.16",

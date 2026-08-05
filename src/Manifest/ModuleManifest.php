@@ -7,11 +7,13 @@ namespace InvoiceShelf\Modules\Manifest;
 use InvalidArgumentException;
 
 /**
- * Version 1 extension of nwidart's module.json loader descriptor.
+ * Versioned extension of nwidart's module.json loader descriptor.
  */
 final readonly class ModuleManifest
 {
-    public const SCHEMA_VERSION = 1;
+    public const SCHEMA_VERSION = 2;
+
+    public const LEGACY_SCHEMA_VERSION = 1;
 
     /**
      * @param  list<class-string>  $providers
@@ -36,6 +38,7 @@ final readonly class ModuleManifest
         public string $migrationPolicy,
         public string $dependencyPolicy,
         public array $assets,
+        public ?Uninstall $uninstall = null,
     ) {}
 
     /** @param array<string, mixed> $value */
@@ -44,11 +47,12 @@ final readonly class ModuleManifest
         self::rejectUnknownKeys($value, [
             'name', 'alias', 'description', 'keywords', 'priority', 'providers', 'aliases', 'files', 'requires',
             'schema_version', 'slug', 'version', 'license', 'compatibility', 'module_dependencies',
-            'migration_policy', 'dependency_policy', 'assets',
+            'migration_policy', 'dependency_policy', 'assets', 'uninstall',
         ]);
 
-        if (($value['schema_version'] ?? null) !== self::SCHEMA_VERSION) {
-            throw new InvalidArgumentException('Only module manifest schema_version=1 is supported.');
+        $schemaVersion = $value['schema_version'] ?? null;
+        if (! in_array($schemaVersion, [self::LEGACY_SCHEMA_VERSION, self::SCHEMA_VERSION], true)) {
+            throw new InvalidArgumentException('Only module manifest schema_version=1 or schema_version=2 is supported.');
         }
 
         $slug = self::string($value, 'slug');
@@ -92,8 +96,12 @@ final readonly class ModuleManifest
 
         $dependencies = self::dependencies($value['module_dependencies'] ?? null, $slug);
 
-        if (($value['migration_policy'] ?? null) !== 'forward-only') {
-            throw new InvalidArgumentException("Only migration_policy 'forward-only' is supported.");
+        $migrationPolicy = $value['migration_policy'] ?? null;
+        if ($schemaVersion === self::LEGACY_SCHEMA_VERSION && $migrationPolicy !== 'forward-only') {
+            throw new InvalidArgumentException("Module manifest schema_version=1 requires migration_policy 'forward-only'.");
+        }
+        if ($schemaVersion === self::SCHEMA_VERSION && $migrationPolicy !== 'reversible') {
+            throw new InvalidArgumentException("Module manifest schema_version=2 requires migration_policy 'reversible'.");
         }
 
         if (($value['dependency_policy'] ?? null) !== 'host-provided-only') {
@@ -115,9 +123,10 @@ final readonly class ModuleManifest
             self::map($value['requires'] ?? null, 'requires'),
             $compatibility,
             $dependencies,
-            'forward-only',
+            $migrationPolicy,
             'host-provided-only',
             self::assets($value['assets'] ?? null),
+            self::uninstall($value, $moduleName, $schemaVersion),
         );
     }
 
@@ -125,7 +134,7 @@ final readonly class ModuleManifest
     public function toArray(): array
     {
         return [
-            'schema_version' => self::SCHEMA_VERSION,
+            'schema_version' => $this->uninstall === null ? self::LEGACY_SCHEMA_VERSION : self::SCHEMA_VERSION,
             'slug' => $this->slug,
             'name' => $this->name,
             'alias' => $this->alias,
@@ -143,6 +152,7 @@ final readonly class ModuleManifest
             'migration_policy' => $this->migrationPolicy,
             'dependency_policy' => $this->dependencyPolicy,
             'assets' => $this->assets,
+            ...($this->uninstall === null ? [] : ['uninstall' => $this->uninstall->toArray()]),
         ];
     }
 
@@ -259,6 +269,24 @@ final readonly class ModuleManifest
         }
 
         return $assets;
+    }
+
+    /** @param array<string, mixed> $value */
+    private static function uninstall(array $value, string $moduleName, int $schemaVersion): ?Uninstall
+    {
+        if ($schemaVersion === self::LEGACY_SCHEMA_VERSION) {
+            if (array_key_exists('uninstall', $value)) {
+                throw new InvalidArgumentException("Module manifest schema_version=1 does not support 'uninstall'.");
+            }
+
+            return null;
+        }
+
+        if (! is_array($value['uninstall'] ?? null) || array_is_list($value['uninstall'])) {
+            throw new InvalidArgumentException("Module manifest schema_version=2 must declare an 'uninstall' object.");
+        }
+
+        return Uninstall::fromArray($value['uninstall'], $moduleName);
     }
 
     /** @param array<string, mixed> $value @param list<string> $allowed */

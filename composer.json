@@ -9,6 +9,7 @@
     "license": "MIT",
     "type": "library",
     "require": {
+        "nikic/php-parser": "^5.0",
         "php": "^8.3",
         "nwidart/laravel-modules": "^13.0"
     },
