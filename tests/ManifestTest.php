@@ -28,7 +28,7 @@ class ManifestTest extends TestCase
         $this->assertSame('AGPL-3.0-only', $stub['license']);
         $this->assertSame('^8.3', $stub['require']['php']);
         $this->assertSame('*', $stub['require']['ext-json']);
-        $this->assertSame('^3.2', $stub['require']['invoiceshelf/modules']);
+        $this->assertSame('^3.3', $stub['require']['invoiceshelf/modules']);
         $this->assertSame('^11.0', $stub['require-dev']['orchestra/testbench']);
         $this->assertSame('^12.0', $stub['require-dev']['phpunit/phpunit']);
         $this->assertSame('vendor/bin/pint --test', $stub['scripts']['lint']);
@@ -52,20 +52,32 @@ class ManifestTest extends TestCase
 
         $stub = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
         $this->assertSame(2, $stub['schema_version']);
-        $this->assertSame('^1.1.0', $stub['compatibility']['module_api']);
+        $this->assertSame('^1.2.0', $stub['compatibility']['module_api']);
         $this->assertSame('reversible', $stub['migration_policy']);
         $this->assertSame('$MODULE_NAMESPACE$\\$STUDLY_NAME$\\Providers\\$STUDLY_NAME$ServiceProvider', $stub['uninstall']['data_cleanup']);
         $this->assertStringContainsString('implements DataCleanup', $provider);
         $this->assertStringContainsString('function cleanup(): void', $provider);
     }
 
-    public function test_provider_stub_uses_the_public_platform_ai_driver_contract(): void
+    public function test_provider_stub_uses_the_public_sdk_ai_driver_contract(): void
     {
         $provider = file_get_contents(dirname(__DIR__).'/stubs/scaffold/provider.stub');
 
         $this->assertIsString($provider);
-        $this->assertStringContainsString('App\\Platform\\Ai\\Contracts\\AiDriver', $provider);
-        $this->assertStringNotContainsString('App\\Support\\Ai\\AiDriver', $provider);
+        $this->assertStringContainsString('InvoiceShelf\\Modules\\Ai\\Contracts\\AiDriver', $provider);
+        $this->assertStringNotContainsString('App\\Platform\\Ai\\Contracts\\AiDriver', $provider);
+    }
+
+    public function test_sdk_publishes_the_typed_frontend_extension_contract(): void
+    {
+        $types = file_get_contents(dirname(__DIR__).'/frontend/index.d.ts');
+
+        $this->assertIsString($types);
+        $this->assertStringContainsString('interface InvoiceShelfExtensionApi', $types);
+        $this->assertStringContainsString('registerHeaderAction', $types);
+        $this->assertStringContainsString('registerRichEditorToolbarAction', $types);
+        $this->assertStringContainsString('registerCompanySettingsPage', $types);
+        $this->assertStringContainsString("'company:changed'", $types);
     }
 
     public function test_valid_module_manifest_is_normalized(): void
