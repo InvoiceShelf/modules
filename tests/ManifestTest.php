@@ -59,6 +59,15 @@ class ManifestTest extends TestCase
         $this->assertStringContainsString('function cleanup(): void', $provider);
     }
 
+    public function test_provider_stub_uses_the_public_platform_ai_driver_contract(): void
+    {
+        $provider = file_get_contents(dirname(__DIR__).'/stubs/scaffold/provider.stub');
+
+        $this->assertIsString($provider);
+        $this->assertStringContainsString('App\\Platform\\Ai\\Contracts\\AiDriver', $provider);
+        $this->assertStringNotContainsString('App\\Support\\Ai\\AiDriver', $provider);
+    }
+
     public function test_valid_module_manifest_is_normalized(): void
     {
         $manifest = ModuleManifest::fromArray($this->moduleManifest());

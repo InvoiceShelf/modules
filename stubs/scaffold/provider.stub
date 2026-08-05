@@ -121,7 +121,7 @@ class $CLASS$ extends ModuleServiceProvider implements DataCleanup
         // -------------------------------------------------------------------
         // Custom AI driver — uncomment if your module ships one.
         //
-        // The driver class must extend App\Support\Ai\AiDriver and implement
+        // The driver class must extend App\Platform\Ai\Contracts\AiDriver and implement
         // chatCompletion(), textCompletion(), and validateConnection(). The
         // host's AI configuration UI will pick up `label`, `website`,
         // `supported_roles`, `suggested_models`, and any `config_fields`.
