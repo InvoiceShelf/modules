@@ -570,6 +570,30 @@ class RegistryTest extends TestCase
         $this->assertSame([], Registry::allAbilities());
         $this->assertSame([], Registry::abilitiesFor('tasks-projects'));
     }
+
+    public function test_menu_placement_keys_are_kept_and_validated(): void
+    {
+        Registry::registerMenu('placed', ['title' => 'Placed', 'link' => '/admin/modules/placed', 'icon' => 'FolderIcon', 'group' => 'documents', 'priority' => 25]);
+
+        self::assertSame('documents', Registry::menuFor('placed')['group']);
+        self::assertSame(25, Registry::menuFor('placed')['priority']);
+    }
+
+    public function test_menu_priority_must_be_an_integer(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Menu entry 'bad' priority must be an integer.");
+
+        Registry::registerMenu('bad', ['title' => 'Bad', 'link' => '/x', 'icon' => 'FolderIcon', 'priority' => '10']);
+    }
+
+    public function test_user_menu_group_must_be_a_non_empty_string(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Menu entry 'bad' group must be a non-empty string.");
+
+        Registry::registerUserMenu('bad', ['title' => 'Bad', 'link' => '/x', 'icon' => 'FolderIcon', 'group' => '']);
+    }
 }
 
 class FakeAiDriver extends AiDriver

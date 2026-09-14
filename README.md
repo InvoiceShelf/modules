@@ -107,6 +107,27 @@ Registry::registerMenu('sales-tax-us', [
 ]);
 ```
 
+### Sidebar placement
+
+`registerMenu` and `registerUserMenu` accept two placement keys besides `title`, `link` and `icon`:
+
+- `group`: the sidebar group the entry joins. The default is `modules`, rendered last with the
+  "Modules" label. A module may join a core group instead: `main` (Dashboard 10, Customers 20,
+  Items 30), `documents` (Estimates 10, Invoices 20, Payments 30, Expenses 40) or `admin`
+  (Members 20, Reports 30, Settings 40).
+- `priority`: an integer; lower sorts first inside the group, default `100`. Entries with equal
+  priority keep registration order, so official modules set explicit values (`10`, `20`, ...).
+  Groups are ordered by the lowest priority they contain.
+
+```php
+Registry::registerMenu('tasks-projects', [
+    'title'    => 'tasksprojects::menu.title',
+    'link'     => '/admin/modules/tasks-projects',
+    'icon'     => 'ClipboardDocumentListIcon',
+    'priority' => 10,
+]);
+```
+
 ### Abilities
 
 `Registry::registerAbility()` adds a module's own permissions to the host's ability catalogue. Every

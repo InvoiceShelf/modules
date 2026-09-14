@@ -105,11 +105,33 @@ class Registry
      */
     public static function registerMenu(string $slug, array $item): void
     {
+        self::validateMenuItem($slug, $item);
+
         static::$menu[$slug] = array_merge([
             'group' => 'modules',
             'group_label' => 'navigation.modules',
             'priority' => 100,
         ], $item);
+    }
+
+    /**
+     * Placement keys are optional, but when present they must be usable by the
+     * host sidebar: `priority` is an integer (lower sorts first inside a group,
+     * default 100) and `group` is a non-empty string naming a sidebar group.
+     *
+     * @param  array<string, mixed>  $item
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function validateMenuItem(string $slug, array $item): void
+    {
+        if (array_key_exists('priority', $item) && ! is_int($item['priority'])) {
+            throw new InvalidArgumentException("Menu entry '{$slug}' priority must be an integer.");
+        }
+
+        if (array_key_exists('group', $item) && (! is_string($item['group']) || trim($item['group']) === '')) {
+            throw new InvalidArgumentException("Menu entry '{$slug}' group must be a non-empty string.");
+        }
     }
 
     /**
@@ -154,6 +176,8 @@ class Registry
      */
     public static function registerUserMenu(string $slug, array $item): void
     {
+        self::validateMenuItem($slug, $item);
+
         static::$userMenu[$slug] = array_merge([
             'priority' => 100,
         ], $item);
