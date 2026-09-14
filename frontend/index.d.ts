@@ -38,6 +38,28 @@ export interface SettingsPageContribution
   meta?: Record<string, unknown>
 }
 
+export interface PageRouteMeta {
+  /** Namespaced ability id(s) checked by the host route guard, e.g. 'tasks-projects:view-project'. */
+  ability?: string | string[]
+  /** i18n key for the page title. */
+  title?: string
+  [key: string]: unknown
+}
+
+export interface PageChildContribution {
+  id: string
+  /** Relative to the parent page, without a leading slash. '' is the index child. */
+  path: string
+  component: Component
+  meta?: PageRouteMeta
+}
+
+export interface PageContribution extends PageChildContribution {
+  /** The module.json slug. The page mounts at /admin/modules/{module}/{path}; 'settings' is reserved by the host. */
+  module: string
+  children?: PageChildContribution[]
+}
+
 export interface BootstrapCompletedEvent {
   adminMode: boolean
   companyId: number | null
@@ -64,6 +86,7 @@ export interface InvoiceShelfExtensionApi {
   registerAdminSettingsNavigation(contribution: SettingsNavigationContribution): () => void
   registerCompanySettingsPage(contribution: SettingsPageContribution): () => void
   registerAdminSettingsPage(contribution: SettingsPageContribution): () => void
+  registerPage(contribution: PageContribution): () => void
   addMessages(messages: Record<string, Record<string, unknown>>): void
   notify(type: 'success' | 'error' | 'warning' | 'info', message: string): void
   on<EventName extends keyof InvoiceShelfExtensionEvents>(

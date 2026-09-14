@@ -2,14 +2,15 @@
 
 The MIT-licensed SDK for official [InvoiceShelf](https://invoiceshelf.com) v3 modules. It extends [`nwidart/laravel-modules`](https://github.com/nWidart/laravel-modules) with the contracts used by InvoiceShelf's module host and signed marketplace packages.
 
-SDK **3.3** supports Module API **1.2**. First-party module packages live in their own repositories and are licensed `AGPL-3.0-only`; this SDK remains MIT.
+SDK **3.4** supports Module API **1.3**. First-party module packages live in their own repositories and are licensed `AGPL-3.0-only`; this SDK remains MIT.
 
 ## What a module can add
 
 - Sidebar entries and schema-driven, per-company settings.
 - Local, compiled JavaScript and CSS registered with the host.
-- Typed frontend contributions through [`frontend/index.d.ts`](frontend/index.d.ts): routes, menus, HTTP access, translations, notifications, and lifecycle events. The host supplies the Vue, router, Axios, and i18n instances—modules do not bundle another framework runtime.
-- Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and the AI assistant's read-only company-data queries. Module code must not depend on InvoiceShelf Eloquent models.
+- Typed frontend contributions through [`frontend/index.d.ts`](frontend/index.d.ts): full-page routes, settings pages, menus, HTTP access, translations, notifications, and lifecycle events. The host supplies the Vue, router, Axios, and i18n instances—modules do not bundle another framework runtime.
+- Company abilities contributed to the host's authorization catalogue, so a module can ship its own permissions instead of reusing host ones.
+- Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and read-only company-data queries. `CompanyDataReader` covers the AI assistant's built-in queries plus `companyMembers()` and `existingInvoiceIds()` for modules that assign work to members or stamp their entries against invoices. Module code must not depend on InvoiceShelf Eloquent models.
 - AI drivers through [`src/Ai`](src/Ai): extend `AiDriver`, return `AiChatResponse`, and throw `AiException` for safe, localizable provider failures.
 
 The host controls discovery, installation, activation, migrations, and provider registration. Official packages are not a general-purpose runtime Composer installer for arbitrary third-party code.
@@ -20,8 +21,8 @@ Declare compatibility in `module.json`, then test it against the host versions y
 
 | Concern | Current contract |
 | --- | --- |
-| SDK | `invoiceshelf/modules` `^3.3` |
-| Module API | `^1.2.0` |
+| SDK | `invoiceshelf/modules` `^3.4` |
+| Module API | `^1.3.0` |
 | Host application | Your explicit InvoiceShelf 3.x range |
 | PHP | The range your module actually supports |
 
@@ -50,7 +51,7 @@ New official modules use schema version 2. Their identity is permanent after the
   ],
   "compatibility": {
     "invoiceshelf": ">=3.0.0-alpha.2 <4.0.0",
-    "module_api": "^1.2.0",
+    "module_api": "^1.3.0",
     "php": "^8.4.0",
     "extensions": ["ext-json"]
   },
@@ -59,7 +60,7 @@ New official modules use schema version 2. Their identity is permanent after the
   "uninstall": {
     "data_cleanup": "Modules\\SalesTaxUs\\Lifecycle\\DataCleanup"
   },
-  "assets": ["dist/module.js", "dist/module.css"]
+  "assets": ["dist/init.js", "dist/style.css"]
 }
 ```
 
@@ -90,7 +91,7 @@ An intentionally empty method is valid for a module with nothing beyond reversib
 Install the SDK in the module project, then use Laravel Modules as usual:
 
 ```bash
-composer require invoiceshelf/modules:^3.3
+composer require invoiceshelf/modules:^3.4
 php artisan module:make SalesTaxUs
 ```
 
@@ -105,6 +106,46 @@ Registry::registerMenu('sales-tax-us', [
     'icon' => 'CalculatorIcon',
 ]);
 ```
+
+### Abilities
+
+`Registry::registerAbility()` adds a module's own permissions to the host's ability catalogue. Every
+ability is stored namespaced as `{slug}:{ability}`, so a module can never collide with a host ability
+or with another module:
+
+```php
+Registry::registerAbility('sales-tax-us', [
+    'ability' => 'view-filing',
+    'name' => 'View Tax Filings',
+    'depends_on' => ['view-invoice', Registry::abilityId('sales-tax-us', 'view-rate')],
+    'owner_only' => false,
+]);
+```
+
+`ability` is plain kebab-case and `name` is the label shown in the role editor. `depends_on` lists
+abilities implied by this one: host abilities in plain form (`view-invoice`), the module's own in
+namespaced form via `Registry::abilityId()`. Module abilities are never model-scoped.
+
+The host grants a module's abilities to owner roles when the module is enabled and removes them when
+it is uninstalled; other roles get them through the role editor. Frontend pages must gate on the same
+namespaced id through `meta.ability` (see below), and re-registering an identical entry is a no-op
+while a conflicting redefinition throws.
+
+### Full-page routes
+
+`extensions.registerPage()` mounts a module page at `/admin/modules/{slug}/{path}`, where `{slug}` is
+the `module.json` slug. Declare `meta.ability` with the namespaced ability id so the host route guard
+can check it, and add `children` for sub-routes relative to the page. The `settings` path is reserved
+by the host for the schema-rendered settings page.
+
+Point the `Registry::registerMenu` link at `/admin/modules/{slug}` for a module with its own pages,
+and at `/admin/modules/{slug}/settings` for a settings-only module.
+
+`registerPage`, `Registry::registerAbility`, and the `CompanyDataReader::companyMembers()` and
+`existingInvoiceIds()` queries are Module API **1.3.0** additions. Declare
+`"module_api": "^1.3.0"` in `module.json` before using them.
+
+### Validating a package
 
 Validate both the manifest and the distributable package before every release:
 
