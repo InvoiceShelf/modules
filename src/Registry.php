@@ -85,11 +85,11 @@ class Registry
      *
      * Each stored entry is normalized to the shape the host's role editor and
      * CompanyService::setupRoles consume:
-     *   - 'ability'    (string)       — '{slug}:{ability}', namespaced at registration
-     *   - 'name'       (string)       — human label shown in the role editor
-     *   - 'model'      (null)         — module abilities are never model-scoped
-     *   - 'depends_on' (list<string>) — abilities implied by this one
-     *   - 'owner_only' (bool)         — restrict the ability to the owner role
+     *   - 'ability'    (string) '{slug}:{ability}', namespaced at registration
+     *   - 'name'       (string) human label shown in the role editor
+     *   - 'model'      (null) module abilities are never model-scoped
+     *   - 'depends_on' (list<string>) abilities implied by this one
+     *   - 'owner_only' (bool) restrict the ability to the owner role
      *
      * The host grants these to owner roles when a module is enabled and drops
      * them again on uninstall.
