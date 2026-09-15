@@ -117,7 +117,8 @@ Registry::registerMenu('sales-tax-us', [
   (Members 20, Reports 30, Settings 40).
 - `priority`: an integer; lower sorts first inside the group, default `100`. Entries with equal
   priority keep registration order, so official modules set explicit values (`10`, `20`, ...).
-  Groups are ordered by the lowest priority they contain.
+  Groups keep the order the host sends them in: the core groups first, then module groups in
+  registration order, so a low priority never lifts a module group above the core ones.
 
 ```php
 Registry::registerMenu('tasks-projects', [
