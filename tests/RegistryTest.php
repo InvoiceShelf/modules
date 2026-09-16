@@ -454,6 +454,146 @@ class RegistryTest extends TestCase
 
         $this->assertSame([], Registry::allDrivers('exchange_rate'));
     }
+
+    public function test_register_ability_round_trip(): void
+    {
+        Registry::registerAbility('tasks-projects', ['ability' => 'view-project', 'name' => 'View Projects']);
+        Registry::registerAbility('tasks-projects', ['ability' => 'manage-project', 'name' => 'Manage Projects', 'owner_only' => true]);
+        Registry::registerAbility('stock-control', ['ability' => 'adjust-stock', 'name' => 'Adjust Stock', 'depends_on' => ['view-item']]);
+
+        $this->assertSame(
+            [
+                'ability' => 'tasks-projects:view-project',
+                'name' => 'View Projects',
+                'model' => null,
+                'depends_on' => [],
+                'owner_only' => false,
+            ],
+            Registry::abilitiesFor('tasks-projects')[0],
+        );
+        $this->assertSame(
+            ['ability', 'name', 'model', 'depends_on', 'owner_only'],
+            array_keys(Registry::abilitiesFor('tasks-projects')[0]),
+        );
+        $this->assertSame(
+            ['tasks-projects:view-project', 'tasks-projects:manage-project'],
+            array_column(Registry::abilitiesFor('tasks-projects'), 'ability'),
+        );
+        $this->assertTrue(Registry::abilitiesFor('tasks-projects')[1]['owner_only']);
+        $this->assertSame(['view-item'], Registry::abilitiesFor('stock-control')[0]['depends_on']);
+        $this->assertSame(
+            ['tasks-projects:view-project', 'tasks-projects:manage-project', 'stock-control:adjust-stock'],
+            array_column(Registry::allAbilities(), 'ability'),
+        );
+    }
+
+    public function test_ability_id_namespaces_an_ability_with_its_module_slug(): void
+    {
+        $this->assertSame('tasks-projects:view-project', Registry::abilityId('tasks-projects', 'view-project'));
+    }
+
+    public function test_ability_registration_is_idempotent_for_an_identical_entry(): void
+    {
+        Registry::registerAbility('tasks-projects', ['ability' => 'view-project', 'name' => 'View Projects']);
+        Registry::registerAbility('tasks-projects', ['ability' => 'view-project', 'name' => 'View Projects']);
+
+        $this->assertCount(1, Registry::abilitiesFor('tasks-projects'));
+    }
+
+    public function test_ability_rejects_a_conflicting_duplicate_without_replacing_the_first_registration(): void
+    {
+        Registry::registerAbility('tasks-projects', ['ability' => 'view-project', 'name' => 'View Projects']);
+
+        try {
+            Registry::registerAbility('tasks-projects', ['ability' => 'view-project', 'name' => 'Browse Projects']);
+            $this->fail('Expected a conflicting ability registration to throw.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString("tasks-projects:view-project' is already registered", $exception->getMessage());
+            $this->assertStringContainsString("module 'tasks-projects'", $exception->getMessage());
+        }
+
+        $this->assertSame('View Projects', Registry::abilitiesFor('tasks-projects')[0]['name']);
+    }
+
+    public function test_ability_depends_on_accepts_plain_host_and_namespaced_module_ids(): void
+    {
+        Registry::registerAbility('tasks-projects', [
+            'ability' => 'view-project',
+            'name' => 'View Projects',
+            'depends_on' => ['view-customer', Registry::abilityId('tasks-projects', 'view-task')],
+        ]);
+
+        $this->assertSame(
+            ['view-customer', 'tasks-projects:view-task'],
+            Registry::abilitiesFor('tasks-projects')[0]['depends_on'],
+        );
+    }
+
+    #[DataProvider('invalidAbilityRegistrations')]
+    public function test_register_ability_rejects_malformed_entries(string $slug, array $entry, string $message): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Registry::registerAbility($slug, $entry);
+    }
+
+    /** @return iterable<string, array{string, array<string, mixed>, string}> */
+    public static function invalidAbilityRegistrations(): iterable
+    {
+        $valid = ['ability' => 'view-project', 'name' => 'View Projects'];
+
+        yield 'invalid slug' => ['Tasks_Projects', $valid, "Module slug 'Tasks_Projects' must be lower-case kebab-case"];
+        yield 'missing ability' => ['tasks-projects', ['name' => 'View Projects'], "must declare a non-empty string 'ability' key"];
+        yield 'namespaced ability' => ['tasks-projects', array_replace($valid, ['ability' => 'tasks-projects:view-project']), 'must not contain a colon'];
+        yield 'uppercase ability' => ['tasks-projects', array_replace($valid, ['ability' => 'viewProject']), "'viewProject' must be lower-case kebab-case"];
+        yield 'blank name' => ['tasks-projects', array_replace($valid, ['name' => ' ']), 'name must be a non-empty string'];
+        yield 'model-scoped ability' => ['tasks-projects', array_replace($valid, ['model' => 'App\Models\Project']), 'model must be absent or null'];
+        yield 'unknown key' => ['tasks-projects', array_replace($valid, ['group' => 'projects']), "unsupported key 'group'"];
+        yield 'non-list depends_on' => ['tasks-projects', array_replace($valid, ['depends_on' => ['project' => 'view-project']]), 'depends_on must be a list of ability ids'];
+        yield 'invalid depends_on entry' => ['tasks-projects', array_replace($valid, ['depends_on' => ['View_Project']]), 'depends_on entries must be plain host ability ids'];
+        yield 'non-bool owner_only' => ['tasks-projects', array_replace($valid, ['owner_only' => 'yes']), 'owner_only must be a boolean'];
+    }
+
+    public function test_abilities_for_an_unknown_slug_is_empty(): void
+    {
+        $this->assertSame([], Registry::abilitiesFor('unknown'));
+        $this->assertSame([], Registry::allAbilities());
+    }
+
+    public function test_flush_clears_abilities(): void
+    {
+        Registry::registerAbility('tasks-projects', ['ability' => 'view-project', 'name' => 'View Projects']);
+
+        Registry::flush();
+
+        $this->assertSame([], Registry::allAbilities());
+        $this->assertSame([], Registry::abilitiesFor('tasks-projects'));
+    }
+
+    public function test_menu_placement_keys_are_kept_and_validated(): void
+    {
+        Registry::registerMenu('placed', ['title' => 'Placed', 'link' => '/admin/modules/placed', 'icon' => 'FolderIcon', 'group' => 'documents', 'priority' => 25]);
+
+        self::assertSame('documents', Registry::menuFor('placed')['group']);
+        self::assertSame(25, Registry::menuFor('placed')['priority']);
+    }
+
+    public function test_menu_priority_must_be_an_integer(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Menu entry 'bad' priority must be an integer.");
+
+        Registry::registerMenu('bad', ['title' => 'Bad', 'link' => '/x', 'icon' => 'FolderIcon', 'priority' => '10']);
+    }
+
+    public function test_user_menu_group_must_be_a_non_empty_string(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Menu entry 'bad' group must be a non-empty string.");
+
+        Registry::registerUserMenu('bad', ['title' => 'Bad', 'link' => '/x', 'icon' => 'FolderIcon', 'group' => '']);
+    }
 }
 
 class FakeAiDriver extends AiDriver

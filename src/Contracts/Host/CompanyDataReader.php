@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace InvoiceShelf\Modules\Contracts\Host;
 
 /**
- * Read-only company data required by the AI assistant's twelve built-in queries.
+ * Read-only, company-scoped queries the host exposes to official modules.
+ *
+ * Introduced for the AI assistant's built-in queries, the reader now also
+ * serves other official modules that need to read company data without
+ * touching host Eloquent models.
  *
  * Returned values are arrays of scalar data only. Hosts must not expose ORM
  * models, collections, or framework-specific value objects across this boundary.
@@ -15,10 +19,19 @@ interface CompanyDataReader
     /** @return array<string, mixed> */
     public function companyStats(int $companyId, string $startDate, string $endDate): array;
 
-    /** @return array<string, mixed>|null */
+    /**
+     * The row carries the customer's `currency_id` and a `currency` sub-array
+     * shaped {id, code, symbol, precision}, or null when none is set.
+     *
+     * @return array<string, mixed>|null
+     */
     public function findCustomer(int $companyId, int $customerId): ?array;
 
-    /** @return array<string, mixed> */
+    /**
+     * Rows carry the customer's `currency_id`.
+     *
+     * @return array<string, mixed>
+     */
     public function searchCustomers(int $companyId, ?string $query, int $limit): array;
 
     /** @return array<string, mixed> */
@@ -53,4 +66,13 @@ interface CompanyDataReader
 
     /** @return array<string, mixed> */
     public function rankItems(int $companyId, string $metric, ?string $startDate, ?string $endDate, int $limit): array;
+
+    /** @return list<array{id: int, name: string, email: string, avatar: string|null}> members of the company, ordered by name then id */
+    public function companyMembers(int $companyId): array;
+
+    /**
+     * @param  list<int>  $invoiceIds
+     * @return list<int> the subset of $invoiceIds that exist in the company
+     */
+    public function existingInvoiceIds(int $companyId, array $invoiceIds): array;
 }

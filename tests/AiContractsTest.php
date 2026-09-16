@@ -67,6 +67,7 @@ class AiContractsTest extends TestCase
             [
                 'companyStats', 'findCustomer', 'searchCustomers', 'rankCustomers', 'findInvoice', 'searchInvoices',
                 'overdueInvoices', 'recentPayments', 'expenseCategories', 'rankExpenseCategories', 'searchItems', 'rankItems',
+                'companyMembers', 'existingInvoiceIds',
             ],
             array_map(static fn (ReflectionMethod $method): string => $method->getName(), (new \ReflectionClass(CompanyDataReader::class))->getMethods()),
         );

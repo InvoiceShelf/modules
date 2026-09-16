@@ -81,17 +81,57 @@ class Registry
     public static array $drivers = [];
 
     /**
+     * Ability registrations keyed by module slug, then by namespaced ability id.
+     *
+     * Each stored entry is normalized to the shape the host's role editor and
+     * CompanyService::setupRoles consume:
+     *   - 'ability'    (string) '{slug}:{ability}', namespaced at registration
+     *   - 'name'       (string) human label shown in the role editor
+     *   - 'model'      (null) module abilities are never model-scoped
+     *   - 'depends_on' (list<string>) abilities implied by this one
+     *   - 'owner_only' (bool) restrict the ability to the owner role
+     *
+     * The host grants these to owner roles when a module is enabled and drops
+     * them again on uninstall.
+     *
+     * @var array<string, array<string, array{ability: string, name: string, model: null, depends_on: list<string>, owner_only: bool}>>
+     */
+    public static array $abilities = [];
+
+    /**
      * Register a sidebar entry for a module.
      *
      * @param  array{title: string, link: string, icon: string}  $item
      */
     public static function registerMenu(string $slug, array $item): void
     {
+        self::validateMenuItem($slug, $item);
+
         static::$menu[$slug] = array_merge([
             'group' => 'modules',
             'group_label' => 'navigation.modules',
             'priority' => 100,
         ], $item);
+    }
+
+    /**
+     * Placement keys are optional, but when present they must be usable by the
+     * host sidebar: `priority` is an integer (lower sorts first inside a group,
+     * default 100) and `group` is a non-empty string naming a sidebar group.
+     *
+     * @param  array<string, mixed>  $item
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function validateMenuItem(string $slug, array $item): void
+    {
+        if (array_key_exists('priority', $item) && ! is_int($item['priority'])) {
+            throw new InvalidArgumentException("Menu entry '{$slug}' priority must be an integer.");
+        }
+
+        if (array_key_exists('group', $item) && (! is_string($item['group']) || trim($item['group']) === '')) {
+            throw new InvalidArgumentException("Menu entry '{$slug}' group must be a non-empty string.");
+        }
     }
 
     /**
@@ -136,6 +176,8 @@ class Registry
      */
     public static function registerUserMenu(string $slug, array $item): void
     {
+        self::validateMenuItem($slug, $item);
+
         static::$userMenu[$slug] = array_merge([
             'priority' => 100,
         ], $item);
@@ -359,6 +401,143 @@ class Registry
     }
 
     /**
+     * Register an ability a module contributes to the host's ability catalogue.
+     *
+     * Modules call this from their ServiceProvider::boot():
+     *
+     *     Registry::registerAbility('tasks-projects', [
+     *         'ability'    => 'view-project',
+     *         'name'       => 'View Projects',
+     *         'depends_on' => ['view-customer', Registry::abilityId('tasks-projects', 'view-task')],
+     *     ]);
+     *
+     * The ability is stored namespaced as '{slug}:{ability}' so module abilities
+     * can never collide with host abilities or with each other. Use abilityId()
+     * to build the same id for a frontend route's `meta.ability`.
+     *
+     * @param  array{ability: string, name: string, depends_on?: list<string>, model?: null, owner_only?: bool}  $entry
+     *
+     * @throws InvalidArgumentException
+     */
+    public static function registerAbility(string $slug, array $entry): void
+    {
+        $normalized = self::validateAbility($slug, $entry);
+        $id = $normalized['ability'];
+
+        if ((static::$abilities[$slug][$id] ?? null) === $normalized) {
+            return;
+        }
+
+        if (isset(static::$abilities[$slug][$id])) {
+            throw new InvalidArgumentException("Ability '{$id}' is already registered for module '{$slug}'.");
+        }
+
+        static::$abilities[$slug][$id] = $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     * @return array{ability: string, name: string, model: null, depends_on: list<string>, owner_only: bool}
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function validateAbility(string $slug, array $entry): array
+    {
+        $kebab = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/';
+
+        if (! preg_match($kebab, $slug)) {
+            throw new InvalidArgumentException("Module slug '{$slug}' must be lower-case kebab-case, matching the module.json slug.");
+        }
+
+        foreach (array_keys($entry) as $key) {
+            if (! in_array($key, ['ability', 'name', 'model', 'depends_on', 'owner_only'], true)) {
+                throw new InvalidArgumentException("Module '{$slug}' ability contains an unsupported key '{$key}'.");
+            }
+        }
+
+        $ability = $entry['ability'] ?? null;
+        if (! is_string($ability) || $ability === '') {
+            throw new InvalidArgumentException("Module '{$slug}' must declare a non-empty string 'ability' key.");
+        }
+        if (str_contains($ability, ':')) {
+            throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' must not contain a colon; the registry namespaces it as '{$slug}:{ability}'.");
+        }
+        if (! preg_match($kebab, $ability)) {
+            throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' must be lower-case kebab-case.");
+        }
+
+        $name = $entry['name'] ?? null;
+        if (! is_string($name) || trim($name) === '') {
+            throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' name must be a non-empty string.");
+        }
+
+        if (array_key_exists('model', $entry) && $entry['model'] !== null) {
+            throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' model must be absent or null; module abilities are never model-scoped.");
+        }
+
+        $dependsOn = $entry['depends_on'] ?? [];
+        if (! is_array($dependsOn) || ! array_is_list($dependsOn)) {
+            throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' depends_on must be a list of ability ids.");
+        }
+        foreach ($dependsOn as $dependency) {
+            if (! is_string($dependency) || ! preg_match('/^(?:[a-z0-9]+(?:-[a-z0-9]+)*:)?[a-z0-9]+(?:-[a-z0-9]+)*$/', $dependency)) {
+                throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' depends_on entries must be plain host ability ids or slug-namespaced module ability ids.");
+            }
+        }
+
+        $ownerOnly = $entry['owner_only'] ?? false;
+        if (! is_bool($ownerOnly)) {
+            throw new InvalidArgumentException("Module '{$slug}' ability '{$ability}' owner_only must be a boolean.");
+        }
+
+        return [
+            'ability' => static::abilityId($slug, $ability),
+            'name' => $name,
+            'model' => null,
+            'depends_on' => $dependsOn,
+            'owner_only' => $ownerOnly,
+        ];
+    }
+
+    /**
+     * Abilities registered by a single module, in registration order.
+     *
+     * @return list<array{ability: string, name: string, model: null, depends_on: list<string>, owner_only: bool}>
+     */
+    public static function abilitiesFor(string $slug): array
+    {
+        return array_values(static::$abilities[$slug] ?? []);
+    }
+
+    /**
+     * Every registered module ability, in slug registration order.
+     *
+     * @return list<array{ability: string, name: string, model: null, depends_on: list<string>, owner_only: bool}>
+     */
+    public static function allAbilities(): array
+    {
+        $abilities = [];
+
+        foreach (static::$abilities as $moduleAbilities) {
+            foreach ($moduleAbilities as $ability) {
+                $abilities[] = $ability;
+            }
+        }
+
+        return $abilities;
+    }
+
+    /**
+     * Build the namespaced id under which a module ability is registered.
+     *
+     * Frontend routes reference the same id through `meta.ability`.
+     */
+    public static function abilityId(string $slug, string $ability): string
+    {
+        return "{$slug}:{$ability}";
+    }
+
+    /**
      * Test-only: clear module-contributed state.
      *
      * Tests that mutate the registry should call this in tearDown() to prevent
@@ -376,6 +555,7 @@ class Registry
         static::$settings = [];
         static::$scripts = [];
         static::$styles = [];
+        static::$abilities = [];
     }
 
     /**
