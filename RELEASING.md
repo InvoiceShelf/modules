@@ -18,7 +18,7 @@ An official module normally calls the tagged SDK workflow from its own tag workf
 ```yaml
 jobs:
   release:
-    uses: InvoiceShelf/modules/.github/workflows/module-release.yml@3.3.0
+    uses: InvoiceShelf/modules/.github/workflows/module-release.yml@3.4.0
     with:
       channel: stable
     secrets: inherit
@@ -42,10 +42,19 @@ The workflow appends `/{slug}/releases` to the ingest URL. It disables persisted
 Generate an Ed25519 keypair with:
 
 ```bash
-vendor/bin/invoiceshelf-module generate-keypair official-2026-01
+vendor/bin/invoiceshelf-module generate-keypair official-modules-2026-09
 ```
 
-Put `secret_key_b64` only in the environment secret. Configure `public_key_b64` under the same `key_id` in the InvoiceShelf and marketplace public-key configuration, then discard the command output. Do not commit either key, the ingest token, or an organization-specific endpoint.
+Official key ids follow `official-modules-<yyyy>-<mm>`. Put `secret_key_b64` only in the environment secret, ideally piped straight from the command into `gh secret set` so it never appears on screen. Configure `public_key_b64` under the same `key_id` in **both** pinned maps, `config/services.php` in the website and `config/invoiceshelf.php` in InvoiceShelf, before the first release signed with it: the host refuses a release whose `key_id` it does not know, and installs only learn new keys through a host release (or the `MARKETPLACE_PUBLIC_KEYS` env override). Add new keys next to old ones; a key whose secret is lost stays trusted so releases already signed with it keep verifying. Discard the command output afterwards. Do not commit either key, the ingest token, or an organization-specific endpoint.
+
+Before the first release of a new module, register it on the marketplace and provision its CI credential:
+
+```bash
+php artisan marketplace:module-register <slug> <ModuleName> "<Display name>" public InvoiceShelf --type=<type> --description="..." --dev=false
+php artisan marketplace:module-credential provision <slug> --repository=InvoiceShelf/module-<slug>
+```
+
+The credential is printed once as the last output line and belongs in `MODULE_MARKETPLACE_INGEST_TOKEN`; the `repository` it is bound to must equal the GitHub repository that runs the release workflow.
 
 ## Signed release manifests
 
