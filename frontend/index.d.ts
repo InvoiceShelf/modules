@@ -76,7 +76,44 @@ export interface InvoiceShelfExtensionEvents {
   'company:changed': CompanyChangeEvent
 }
 
+/**
+ * Running inside a thin client
+ *
+ * The same bundle runs in a browser served by its own server, and inside the
+ * iOS and Android clients, which are a static app package pointed at whichever
+ * server the user signed in to. A module that follows the SDK works in both.
+ * Four rules are what make that true.
+ *
+ * 1. Call the API only through `extensions.client`. Never a bare `fetch`, never
+ *    an axios instance of your own. Only the host client carries the server
+ *    base URL and the bearer token, so in a client `fetch('/api/v1/...')`
+ *    resolves against the app package, where there is no server and no
+ *    credentials to send.
+ * 2. Never hardcode `/api` or `/storage` as a root-relative URL in a template
+ *    or in code. Root-relative is not server-relative in a client: the root is
+ *    the app package. A path handed to `extensions.client` is fine, because the
+ *    host client resolves it against the server. For anything else, such as a
+ *    stored file, the host exposes no asset-URL helper today, so ask for one
+ *    rather than assembling a URL in the module.
+ * 3. Ship self-contained CSS. The host's release bundle is built in CI with no
+ *    `Modules/` directory present, so the host's Tailwind scan never sees your
+ *    markup and cannot emit a class for it. Everything your markup needs must
+ *    come out of your own compiled stylesheet. The host's reset and its theme
+ *    custom properties are shared and may be relied on; a host utility class
+ *    may not.
+ * 4. Do not register a script or a style as a remote http(s) URL. Pass a local
+ *    path inside the module to `Registry::registerScript` and
+ *    `Registry::registerStyle`. An operator cannot add CORS headers to an
+ *    origin they do not control, so the client manifest flags such a script as
+ *    unsupported and clients skip it, which leaves the module working on the
+ *    web and silently absent on mobile.
+ */
 export interface InvoiceShelfExtensionApi {
+  /**
+   * The host's axios instance: server base URL, credentials, and the host's own
+   * interceptors. Every request a module makes goes through it, in a browser and
+   * in a thin client alike. See "Running inside a thin client" above.
+   */
   readonly client: AxiosInstance
   readonly router: Router
   registerHeaderAction(contribution: ComponentExtensionContribution): () => void

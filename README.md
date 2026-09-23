@@ -167,6 +167,43 @@ and at `/admin/modules/{slug}/settings` for a settings-only module.
 `existingInvoiceIds()` queries are Module API **1.3.0** additions. Declare
 `"module_api": "^1.3.0"` in `module.json` before using them.
 
+### Thin clients
+
+The InvoiceShelf mobile clients run the same frontend as the web app, but as a static app package
+pointed at whichever server the user signed in to. A module that follows the SDK already works
+there; nothing about the SDK, the manifest or the install flow changes for it. Four rules are what
+make that true:
+
+- **Call the API only through `extensions.client`.** Never a bare `fetch`, never an axios instance
+  of your own. Only the host client carries the server base URL and the bearer token, so in a client
+  `fetch('/api/v1/...')` resolves against the app package, where there is no server and no
+  credentials to send.
+- **Never hardcode `/api` or `/storage` as a root-relative URL** in a template or in code.
+  Root-relative is not server-relative in a client: the root is the app package. A path handed to
+  `extensions.client` is fine, because the host client resolves it against the server. For anything
+  else, such as a stored file, the host exposes no asset-URL helper today, so ask for one rather
+  than assembling a URL in the module.
+- **Ship self-contained CSS.** The host's release bundle is built in CI with no `Modules/` directory
+  present, so the host's Tailwind scan never sees module markup and cannot emit a class for it.
+  Everything your markup needs must come out of your own compiled stylesheet. The host's reset and
+  its theme custom properties are shared and may be relied on; a host utility class may not.
+- **Register scripts and styles as local paths, never as remote http(s) URLs.** An operator cannot
+  add CORS headers to an origin they do not control, so the client manifest flags such a script as
+  unsupported and clients skip it. The module then keeps working on the web and is silently absent
+  on mobile.
+
+A client loads modules from the server it is connected to, at boot. It reads a public manifest
+listing each enabled module's script and style as absolute, versioned URLs, adds one
+`<link rel="stylesheet">` per style, then imports the scripts one at a time, in manifest order,
+before `window.InvoiceShelf.start()`. The order is fixed and the imports are sequential because
+modules register through `window.InvoiceShelf.booting()` and must see the same order the web
+shell gives them. Each import runs under its own timeout, and a module that fails or times out is
+reported and skipped rather than allowed to block boot, so a module broken in a client costs its
+own features and not the whole app.
+
+The full contract, including the client manifest, the CORS rules and the version gates on the server
+side, is `thin-clients.md` in the private InvoiceShelf specs repository.
+
 ### Validating a package
 
 Validate both the manifest and the distributable package before every release:
