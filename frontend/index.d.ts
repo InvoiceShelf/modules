@@ -18,6 +18,57 @@ export interface ComponentExtensionContribution extends ExtensionContribution {
   props?: Record<string, unknown>
 }
 
+export interface InvoiceExtensionRecord {
+  id: number
+  invoice_number?: string
+  type?: string
+  status?: string
+  paid_status?: string
+  due_amount?: number
+  total?: number
+  related_invoice_id?: number | null
+}
+
+export interface InvoiceActionContext {
+  invoice(): InvoiceExtensionRecord | null
+  isDetailView(): boolean
+  can(ability: string | string[]): boolean
+}
+
+export interface InvoiceDetailContext {
+  invoice(): InvoiceExtensionRecord | null
+  can(ability: string | string[]): boolean
+}
+
+export interface InvoiceCreateContext {
+  isEdit(): boolean
+  isRecurring(): boolean
+  can(ability: string | string[]): boolean
+  total(): number
+  currency(): unknown
+  invoiceDate(): string | null
+  dueDate(): string | null
+}
+
+/**
+ * A save hook runs after the host has created or updated the invoice.
+ * Return true when the module handled the next navigation; return false or
+ * nothing to let the host continue with its normal invoice detail route.
+ */
+export interface InvoiceCreateSaveHookContribution extends ExtensionContribution {
+  handle(
+    savedInvoice: InvoiceExtensionRecord,
+    context: InvoiceCreateContext,
+  ): boolean | void | Promise<boolean | void>
+}
+
+export interface CreateActionContribution extends ExtensionContribution {
+  label: string
+  icon: string
+  to: RouteLocationRaw
+  ability?: string | string[]
+}
+
 export interface RichEditorContext {
   getHtml(): string
   insertContent(content: string): void
@@ -119,6 +170,15 @@ export interface InvoiceShelfExtensionApi {
   registerHeaderAction(contribution: ComponentExtensionContribution): () => void
   registerCompanyLayoutOverlay(contribution: ComponentExtensionContribution): () => void
   registerRichEditorToolbarAction(contribution: ComponentExtensionContribution): () => void
+  registerCreateAction(contribution: CreateActionContribution): () => void
+  registerInvoiceAction(contribution: ComponentExtensionContribution): () => void
+  registerInvoiceDetailAction(contribution: ComponentExtensionContribution): () => void
+  registerInvoiceCreateAction(contribution: ComponentExtensionContribution): () => void
+  registerInvoiceCreateSection(contribution: ComponentExtensionContribution): () => void
+  registerInvoiceCreateSaveHook(
+    contribution: InvoiceCreateSaveHookContribution,
+  ): () => void
+  registerInvoiceDetailPanel(contribution: ComponentExtensionContribution): () => void
   registerCompanySettingsNavigation(contribution: SettingsNavigationContribution): () => void
   registerAdminSettingsNavigation(contribution: SettingsNavigationContribution): () => void
   registerCompanySettingsPage(contribution: SettingsPageContribution): () => void

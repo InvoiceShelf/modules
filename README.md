@@ -9,6 +9,9 @@ SDK **3.4** supports Module API **1.3**. First-party module packages live in the
 - Sidebar entries and schema-driven, per-company settings.
 - Local, compiled JavaScript and CSS registered with the host.
 - Typed frontend contributions through [`frontend/index.d.ts`](frontend/index.d.ts): full-page routes, settings pages, menus, HTTP access, translations, notifications, and lifecycle events. The host supplies the Vue, router, Axios, and i18n instances—modules do not bundle another framework runtime.
+- Generic invoice extension points for list actions, detail actions and panels,
+  invoice-create actions and sections, post-save hooks, and global create-menu
+  actions. These contracts are host-owned and contain no module-specific logic.
 - Company abilities contributed to the host's authorization catalogue, so a module can ship its own permissions instead of reusing host ones.
 - Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and read-only company-data queries. `CompanyDataReader` covers the AI assistant's built-in queries plus `companyMembers()` and `existingInvoiceIds()` for modules that assign work to members or stamp their entries against invoices. Module code must not depend on InvoiceShelf Eloquent models.
 - AI drivers through [`src/Ai`](src/Ai): extend `AiDriver`, return `AiChatResponse`, and throw `AiException` for safe, localizable provider failures.
@@ -166,6 +169,64 @@ and at `/admin/modules/{slug}/settings` for a settings-only module.
 `registerPage`, `Registry::registerAbility`, and the `CompanyDataReader::companyMembers()` and
 `existingInvoiceIds()` queries are Module API **1.3.0** additions. Declare
 `"module_api": "^1.3.0"` in `module.json` before using them.
+
+### Invoice extension points
+
+The frontend API also exposes generic invoice contributions. A module may
+register these without importing InvoiceShelf invoice components or changing
+InvoiceShelf core files:
+
+```ts
+extensions.registerInvoiceAction({
+  id: 'example.invoice-action',
+  priority: 80,
+  component: ExampleInvoiceAction,
+})
+
+extensions.registerInvoiceDetailAction({
+  id: 'example.invoice-detail-action',
+  component: ExampleInvoiceDetailAction,
+})
+
+extensions.registerInvoiceCreateSection({
+  id: 'example.invoice-create-section',
+  component: ExampleInvoiceCreateSection,
+})
+
+extensions.registerInvoiceCreateSaveHook({
+  id: 'example.invoice-create-save',
+  async handle(savedInvoice, context) {
+    if (context.isEdit() || !context.can('example:create')) {
+      return false
+    }
+
+    await createRelatedRecord(savedInvoice.id)
+    return false
+  },
+})
+
+extensions.registerCreateAction({
+  id: 'example.create',
+  label: 'example.new_record',
+  icon: 'DocumentTextIcon',
+  to: '/admin/modules/example/create',
+  ability: 'example:create',
+})
+```
+
+Invoice action, detail, and create components receive the matching context as
+the `context` prop. The context exposes the current invoice, capability checks,
+and the relevant create-form values without exposing host stores. The
+`registerInvoiceCreateSaveHook` callback runs after the host saves the invoice;
+return `true` only when the module takes responsibility for the next
+navigation. Returning `false` or nothing preserves the host's normal
+invoice-detail navigation.
+
+All contributions are identified by a stable module-owned `id`, sorted by
+`priority`, filtered by `visible`, and removed by the teardown function returned
+from registration. These slots are deliberately generic so modules such as
+payment plans, delivery workflows, and tax extensions can share the same host
+contract.
 
 ### Thin clients
 
