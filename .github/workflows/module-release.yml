@@ -12,6 +12,11 @@ on:
         required: false
         default: module.zip
         type: string
+      host-version:
+        description: Bundled modules only. The InvoiceShelf release (a tag such as 3.0.0-alpha.12) whose composer.lock the bundle is built against; it must satisfy compatibility.invoiceshelf.
+        required: false
+        default: ''
+        type: string
     secrets:
       MODULE_SIGNING_SECRET_KEY_B64:
         required: true
@@ -29,6 +34,10 @@ on:
         description: Name for the deterministic module ZIP
         required: true
         default: module.zip
+      host-version:
+        description: Bundled modules only. InvoiceShelf release tag to build the bundle against
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -42,6 +51,7 @@ jobs:
       MODULE_ARTIFACT_NAME: ${{ inputs['artifact-name'] || 'module.zip' }}
       MODULE_SIGNING_KEY_ID: ${{ vars.MODULE_SIGNING_KEY_ID }}
       MODULE_MARKETPLACE_INGEST_URL: ${{ vars.MODULE_MARKETPLACE_INGEST_URL }}
+      MODULE_HOST_VERSION: ${{ inputs['host-version'] || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,6 +73,8 @@ jobs:
           php-version: '8.4'
           extensions: sodium
           coverage: none
+          # Pinned: the bundle a release ships is resolved by this Composer.
+          tools: composer:2.8.12
 
       - uses: actions/setup-node@v4
         with:
@@ -77,6 +89,29 @@ jobs:
             corepack enable
             pnpm install --frozen-lockfile
             pnpm run build
+          fi
+          if [ "$(jq -r '.dependency_policy' module.json)" = bundled ]; then
+            if [ -z "$MODULE_HOST_VERSION" ]; then
+              echo 'Bundled modules need the host-version input: the InvoiceShelf release whose composer.lock the bundle is built against.' >&2
+              exit 1
+            fi
+            if [ ! -f bundle.lock ]; then
+              echo 'Bundled modules must commit bundle.lock; run vendor/bin/invoiceshelf-module bundle locally and commit it.' >&2
+              exit 1
+            fi
+            php -r '
+              require "vendor/autoload.php";
+              $constraint = json_decode(file_get_contents("module.json"), true)["compatibility"]["invoiceshelf"];
+              if (! Composer\Semver\Semver::satisfies(getenv("MODULE_HOST_VERSION"), $constraint)) {
+                  fwrite(STDERR, "host-version ".getenv("MODULE_HOST_VERSION")." does not satisfy compatibility.invoiceshelf {$constraint}.\n");
+                  exit(1);
+              }
+            '
+            curl --fail --silent --show-error --location \
+              "https://raw.githubusercontent.com/InvoiceShelf/InvoiceShelf/$MODULE_HOST_VERSION/composer.lock" \
+              --output "$RUNNER_TEMP/host-composer.lock"
+            # Installs exactly bundle.lock; fails if it no longer fits this host or composer.json.
+            vendor/bin/invoiceshelf-module bundle . --host-lock="$RUNNER_TEMP/host-composer.lock"
           fi
           vendor/bin/invoiceshelf-module validate-module module.json
           vendor/bin/invoiceshelf-module validate-package .
@@ -105,6 +140,11 @@ jobs:
           if [ -d dist ]; then
             rm -rf "$package/dist"
             cp -a dist "$package/dist"
+          fi
+          # bundle/ is generated and untracked, like dist/.
+          if [ -d bundle ]; then
+            rm -rf "$package/bundle"
+            cp -a bundle "$package/bundle"
           fi
           find "$stage" -exec touch -h -d "@$source_date_epoch" {} +
           (

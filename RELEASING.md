@@ -5,7 +5,7 @@ This document is for maintainers of official module repositories. It describes t
 ## Before tagging
 
 1. Set `module.json`'s `version` to the intended exact SemVer version.
-2. Build and commit every declared `dist/` asset.
+2. Build and commit every declared `dist/` asset. A bundled module also commits an up-to-date `bundle.lock`, reviewed like code.
 3. Run the module's lint, tests, frontend build, and package validation.
 4. Merge the release change, then create an **unprefixed** tag that exactly matches `module.json`, for example `1.2.3` rather than `v1.2.3`.
 
@@ -18,11 +18,21 @@ An official module normally calls the tagged SDK workflow from its own tag workf
 ```yaml
 jobs:
   release:
-    uses: InvoiceShelf/modules/.github/workflows/module-release.yml@3.4.0
+    uses: InvoiceShelf/modules/.github/workflows/module-release.yml@3.5.0
     with:
       channel: stable
     secrets: inherit
 ```
+
+A module with `dependency_policy: bundled` also passes `host-version`, the InvoiceShelf release tag whose `composer.lock` the bundle is built against. Use the oldest release the module supports: it must satisfy `compatibility.invoiceshelf`, and newer hosts are checked against the recorded host packages at install time.
+
+```yaml
+    with:
+      channel: stable
+      host-version: 3.0.0-alpha.12
+```
+
+The workflow then downloads that lock, installs exactly the committed `bundle.lock` (it never re-resolves) and copies the generated `bundle/` into the archive next to `dist/`. Composer is pinned in the workflow so the same lock always yields the same bytes.
 
 The workflow installs dependencies, runs Pint and PHPUnit, builds frontend assets when present, validates the package, creates a timestamp-normalized ZIP, generates and validates `release-manifest.json`, signs its canonical JSON, and sends it to marketplace ingest.
 

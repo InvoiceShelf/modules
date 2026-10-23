@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace InvoiceShelf\Modules\Manifest;
 
+use Composer\Semver\Comparator;
+use Composer\Semver\VersionParser;
 use InvalidArgumentException;
+use UnexpectedValueException;
 
 /**
  * Versioned extension of nwidart's module.json loader descriptor.
@@ -14,6 +17,15 @@ final readonly class ModuleManifest
     public const SCHEMA_VERSION = 2;
 
     public const LEGACY_SCHEMA_VERSION = 1;
+
+    /** The module may require only PHP, extensions and the SDK; everything else must already be in the host. */
+    public const POLICY_HOST_PROVIDED = 'host-provided-only';
+
+    /** The module ships the third-party packages the host lacks in bundle/, built at release time. */
+    public const POLICY_BUNDLED = 'bundled';
+
+    /** The first host module API that loads bundle/ and checks it against the installed packages. */
+    public const BUNDLED_MODULE_API = '1.4.0';
 
     /**
      * @param  list<class-string>  $providers
@@ -104,9 +116,7 @@ final readonly class ModuleManifest
             throw new InvalidArgumentException("Module manifest schema_version=2 requires migration_policy 'reversible'.");
         }
 
-        if (($value['dependency_policy'] ?? null) !== 'host-provided-only') {
-            throw new InvalidArgumentException("Only dependency_policy 'host-provided-only' is supported; runtime Composer and Node dependencies are forbidden.");
-        }
+        $dependencyPolicy = self::dependencyPolicy($value['dependency_policy'] ?? null, $schemaVersion, $compatibility);
 
         return new self(
             $slug,
@@ -124,10 +134,15 @@ final readonly class ModuleManifest
             $compatibility,
             $dependencies,
             $migrationPolicy,
-            'host-provided-only',
+            $dependencyPolicy,
             self::assets($value['assets'] ?? null),
             self::uninstall($value, $moduleName, $schemaVersion),
         );
+    }
+
+    public function bundlesDependencies(): bool
+    {
+        return $this->dependencyPolicy === self::POLICY_BUNDLED;
     }
 
     /** @return array<string, mixed> */
@@ -247,6 +262,46 @@ final readonly class ModuleManifest
 
         /** @var array<string, string> $value */
         return $value;
+    }
+
+    /**
+     * A bundled module needs schema 2 and a host that knows how to load bundle/,
+     * so its module_api range must start at 1.4.0: an older host then refuses it
+     * at the compatibility check, before anything is downloaded.
+     */
+    private static function dependencyPolicy(mixed $value, int $schemaVersion, Compatibility $compatibility): string
+    {
+        if ($value === self::POLICY_HOST_PROVIDED) {
+            return $value;
+        }
+
+        if ($value !== self::POLICY_BUNDLED) {
+            throw new InvalidArgumentException("dependency_policy must be 'host-provided-only' or 'bundled'; runtime Composer and Node dependencies are forbidden.");
+        }
+
+        if ($schemaVersion !== self::SCHEMA_VERSION) {
+            throw new InvalidArgumentException("dependency_policy 'bundled' requires schema_version=2.");
+        }
+
+        if (! self::startsAtOrAbove($compatibility->moduleApi, self::BUNDLED_MODULE_API)) {
+            throw new InvalidArgumentException("dependency_policy 'bundled' requires compatibility.module_api to start at ".self::BUNDLED_MODULE_API.' or later.');
+        }
+
+        return $value;
+    }
+
+    private static function startsAtOrAbove(string $constraint, string $floor): bool
+    {
+        $parser = new VersionParser;
+
+        try {
+            $lower = $parser->parseConstraints($constraint)->getLowerBound();
+        } catch (UnexpectedValueException) {
+            return false;
+        }
+
+        // Composer gives an inclusive stable lower bound as "x.y.z.0-dev".
+        return Comparator::greaterThanOrEqualTo($lower->getVersion(), $parser->normalize($floor).'-dev');
     }
 
     /** @return list<string> */

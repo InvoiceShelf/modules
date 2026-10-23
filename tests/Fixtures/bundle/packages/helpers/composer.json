@@ -1,0 +1,1 @@
+{"name": "sample/helpers", "version": "1.0.0", "license": ["proprietary", "MIT"], "autoload": {"psr-4": {"Sample\\Helpers\\": "src/"}, "files": ["src/functions.php"]}}
