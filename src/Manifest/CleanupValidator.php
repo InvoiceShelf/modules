@@ -111,6 +111,12 @@ final class CleanupValidator
     {
         $relative = substr($path, strlen(rtrim($directory, DIRECTORY_SEPARATOR)) + 1);
 
-        return $relative !== false && preg_match('#(?:^|/)(?:vendor|node_modules|\.git)(?:/|$)#', str_replace(DIRECTORY_SEPARATOR, '/', $relative)) === 1;
+        if ($relative === false) {
+            return false;
+        }
+        $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+
+        // bundle/ holds third-party code, and only at the module root.
+        return str_starts_with($relative, 'bundle/') || preg_match('#(?:^|/)(?:vendor|node_modules|\.git)(?:/|$)#', $relative) === 1;
     }
 }

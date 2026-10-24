@@ -1,0 +1,49 @@
+{
+    "name": "invoiceshelf/module-tasks-projects",
+    "description": "Official Tasks and Projects module for InvoiceShelf",
+    "license": "AGPL-3.0-only",
+    "authors": [
+        {
+            "name": "InvoiceShelf",
+            "email": "hello@invoiceshelf.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-json": "*",
+        "invoiceshelf/modules": "^3.4"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.26",
+        "orchestra/testbench": "^11.0",
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\TasksProjects\\": "app/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\TasksProjects\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "lint": "vendor/bin/pint --test"
+    },
+    "config": {
+        "allow-plugins": {
+            "wikimedia/composer-merge-plugin": true
+        },
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "repositories": {
+        "invoiceshelf-modules": {
+            "type": "vcs",
+            "url": "https://github.com/InvoiceShelf/modules.git"
+        }
+    }
+}

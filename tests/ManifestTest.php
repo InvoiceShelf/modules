@@ -136,6 +136,7 @@ class ManifestTest extends TestCase
         yield 'bad dependency range' => ['supported SemVer constraint', ['module_dependencies' => ['other-module' => 'dev-main']]];
         yield 'legacy rollback migration policy' => ['schema_version=1 requires migration_policy', ['migration_policy' => 'reversible']];
         yield 'runtime dependency policy' => ['host-provided-only', ['dependency_policy' => 'composer-install']];
+        yield 'bundled dependencies on schema 1' => ["dependency_policy 'bundled' requires schema_version=2", ['dependency_policy' => 'bundled']];
         yield 'remote asset' => ['local dist', ['assets' => ['https://cdn.example.test/module.js']]];
         yield 'source asset' => ['local dist', ['assets' => ['resources/module.ts']]];
         yield 'unknown key' => ['unsupported field', ['composer_dependencies' => []]];
@@ -158,6 +159,21 @@ class ManifestTest extends TestCase
         yield 'missing data cleanup class' => ['data_cleanup', ['uninstall' => ['data_cleanup' => '']]];
         yield 'data cleanup outside module namespace' => ['Modules\\SalesTaxUs namespace', ['uninstall' => ['data_cleanup' => 'App\\Cleanup']]];
         yield 'unknown uninstall key' => ['uninstall contract contains unsupported field', ['uninstall' => ['data_cleanup' => 'Modules\\SalesTaxUs\\Cleanup', 'command' => 'rm -rf']]];
+        yield 'bundled dependencies on an older module api' => ['compatibility.module_api to start at 1.4.0', ['dependency_policy' => 'bundled', 'compatibility' => ['module_api' => '^1.3.0']]];
+        yield 'bundled dependencies on an open module api range' => ['compatibility.module_api to start at 1.4.0', ['dependency_policy' => 'bundled', 'compatibility' => ['module_api' => '<2.0.0']]];
+    }
+
+    public function test_schema_v2_module_manifest_may_bundle_dependencies_from_module_api_1_4(): void
+    {
+        $value = array_replace_recursive($this->reversibleModuleManifest(), [
+            'dependency_policy' => 'bundled',
+            'compatibility' => ['module_api' => '^1.4.0'],
+        ]);
+
+        $manifest = ModuleManifest::fromArray($value);
+
+        $this->assertTrue($manifest->bundlesDependencies());
+        $this->assertSame('bundled', $manifest->toArray()['dependency_policy']);
     }
 
     public function test_canonical_json_sorts_objects_and_preserves_lists_exactly(): void

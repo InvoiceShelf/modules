@@ -2,7 +2,7 @@
 
 The MIT-licensed SDK for official [InvoiceShelf](https://invoiceshelf.com) v3 modules. It extends [`nwidart/laravel-modules`](https://github.com/nWidart/laravel-modules) with the contracts used by InvoiceShelf's module host and signed marketplace packages.
 
-SDK **3.4** supports Module API **1.3**. First-party module packages live in their own repositories and are licensed `AGPL-3.0-only`; this SDK remains MIT.
+SDK **3.5** supports Module API **1.4**. First-party module packages live in their own repositories and are licensed `AGPL-3.0-only`; this SDK remains MIT.
 
 ## What a module can add
 
@@ -13,7 +13,7 @@ SDK **3.4** supports Module API **1.3**. First-party module packages live in the
 - Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and read-only company-data queries. `CompanyDataReader` covers the AI assistant's built-in queries plus `companyMembers()` and `existingInvoiceIds()` for modules that assign work to members or stamp their entries against invoices. Module code must not depend on InvoiceShelf Eloquent models.
 - AI drivers through [`src/Ai`](src/Ai): extend `AiDriver`, return `AiChatResponse`, and throw `AiException` for safe, localizable provider failures.
 
-The host controls discovery, installation, activation, migrations, and provider registration. Official packages are not a general-purpose runtime Composer installer for arbitrary third-party code.
+The host controls discovery, installation, activation, migrations, and provider registration. It never runs Composer: a module either uses only what the host already ships, or brings the third-party packages it needs pre-built in `bundle/` (see [Dependencies](#dependencies)).
 
 ## Compatibility
 
@@ -21,8 +21,8 @@ Declare compatibility in `module.json`, then test it against the host versions y
 
 | Concern | Current contract |
 | --- | --- |
-| SDK | `invoiceshelf/modules` `^3.4` |
-| Module API | `^1.3.0` |
+| SDK | `invoiceshelf/modules` `^3.5` |
+| Module API | `^1.3.0`, or `^1.4.0` for a module with bundled dependencies |
 | Host application | Your explicit InvoiceShelf 3.x range |
 | PHP | The range your module actually supports |
 
@@ -85,6 +85,42 @@ final class DataCleanup implements DataCleanupContract
 ```
 
 An intentionally empty method is valid for a module with nothing beyond reversible migrations. Throwing from `cleanup()` stops the uninstall so it can be retried safely.
+
+## Dependencies
+
+`dependency_policy` says where a module's PHP code comes from. Nothing is resolved on the server: the host never runs Composer, and its own `vendor/` is read-only.
+
+| Policy | composer.json may require | Use it when |
+| --- | --- | --- |
+| `host-provided-only` | `php`, `ext-*`, `invoiceshelf/modules` | The module needs nothing beyond Laravel, the SDK and what the host already ships. |
+| `bundled` | the above plus third-party packages | The module needs a library the host does not ship, such as a payment provider's SDK. Requires schema 2 and `module_api` `^1.4.0`. |
+
+### How a bundle is built
+
+A bundled module declares its packages in `composer.json` as usual and runs:
+
+```bash
+vendor/bin/invoiceshelf-module bundle . --host-lock=../../composer.lock   # the host's lock; --update to re-resolve
+```
+
+The command resolves the module's packages in a throwaway Composer project where every **production** package of that host is a root `replace` at its locked version. Composer therefore reuses what the host ships and installs only what it lacks; a package that needs a version the host does not ship is a resolver error, never a silent second copy. The command then writes:
+
+- `bundle/<vendor>/<package>/…`: the package files, with normalized permissions;
+- `bundle/classmap.php`: every class, relative to `bundle/`, which the host reads as data and loads **after** its own autoloader, so a host copy always wins;
+- `bundle/bundle.json`: each package's version, reference, license, PHP range and extensions, the host packages the module relies on (constraints kept per requirer), and any Composer `files` entries with the functions they declare;
+- `bundle.lock` next to `composer.json`: the pinned resolution.
+
+Commit `bundle.lock` and review its diff like code: signing a release vouches for everything inside it. `bundle/` itself is generated: gitignore it, and keep your own tools out of it (for Pint, `"exclude": ["bundle"]` in `pint.json`). Without `--update` the command installs exactly `bundle.lock` and fails when it no longer fits the host or `composer.json`, or when your own `composer.lock` holds different versions of a bundled package (tests run on `vendor/`, the archive ships `bundle/`). The same tree is written byte for byte on every machine.
+
+The build refuses a bundle the host cannot load safely: a license an AGPL-3.0-only module cannot convey (Composer's license list counts as alternatives), a Composer plugin, a class or function under `App\`, `Composer\`, `Database\`, `Illuminate\`, `InvoiceShelf\`, `Laravel\`, `Modules\`, `Nwidart\` or `Tests\`, an extension that `compatibility.extensions` does not list (core extensions such as `ext-json` and `ext-pcre` excepted), a symbolic link, or more than 9,000 files. It warns when a bundled package is also a development dependency of the host, because a local host then loads its own copy.
+
+### What the host checks
+
+On marketplace install, local `install:module`, enabling a module, and every container start (`modules:reconcile`), the host refuses or disables a bundled module when an installed host package no longer satisfies a recorded constraint, a bundled package's PHP range excludes the running PHP, a bundled package or class is also provided by the host or another module, or a bundled function already exists. Composer `files` entries are loaded only for enabled modules.
+
+### Local development
+
+Build the bundle against the lock of the host you run (for a sibling checkout, `--host-lock=../InvoiceShelf/composer.lock`; for a module placed in the host's `Modules/`, `--host-lock=../../composer.lock`), then `php artisan install:module <Name> <version>`. Rebuild when you change a package or update the host. A local host has its development packages installed, and those win over a bundled copy; the release workflow builds against the production package set.
 
 ## Developing a module
 
@@ -213,7 +249,7 @@ vendor/bin/invoiceshelf-module validate-module module.json
 vendor/bin/invoiceshelf-module validate-package .
 ```
 
-`validate-package` checks the manifest, providers, migrations, declared assets, and the closed host-provided dependency policy. The CLI also validates and canonicalizes generated `release-manifest.json` files.
+`validate-package` checks the manifest, providers, migrations, declared assets, and the dependency policy: for a bundled module, also `bundle/` against `bundle.json` (reading `classmap.php` as data, never running it). The CLI also validates and canonicalizes generated `release-manifest.json` files.
 
 ## Releasing an official module
 

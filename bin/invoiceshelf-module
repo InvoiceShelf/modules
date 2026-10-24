@@ -3,6 +3,8 @@
 
 declare(strict_types=1);
 
+use InvoiceShelf\Modules\Bundle\BundleBuilder;
+use InvoiceShelf\Modules\Bundle\ComposerProcess;
 use InvoiceShelf\Modules\Manifest\ManifestValidator;
 use InvoiceShelf\Modules\Manifest\SigningKeyPairGenerator;
 
@@ -14,12 +16,46 @@ if (! is_string($autoloadPath) || ! is_file($autoloadPath)) {
 
 require $autoloadPath;
 
-[$command, $target] = array_pad(array_slice($argv, 1), 2, null);
+$positional = [];
+$options = [];
+foreach (array_slice($argv, 1) as $argument) {
+    if (preg_match('/^--([a-z-]+)(?:=(.*))?$/', $argument, $matches) === 1) {
+        $options[$matches[1]] = $matches[2] ?? true;
+    } else {
+        $positional[] = $argument;
+    }
+}
+[$command, $target] = array_pad($positional, 2, null);
 
-if (! in_array($command, ['validate-module', 'validate-package', 'validate-release', 'canonicalize-release', 'generate-keypair'], true) || ! is_string($target)) {
+if (! in_array($command, ['validate-module', 'validate-package', 'validate-release', 'canonicalize-release', 'generate-keypair', 'bundle'], true) || ! is_string($target)
+    || ($command === 'bundle' && ! is_string($options['host-lock'] ?? null))) {
     fwrite(STDERR, "Usage: invoiceshelf-module <validate-module|validate-package|validate-release|canonicalize-release> <path>\n");
     fwrite(STDERR, "       invoiceshelf-module generate-keypair <key-id>\n");
+    fwrite(STDERR, "       invoiceshelf-module bundle <module-dir> --host-lock=<host composer.lock> [--update] [--composer=<binary>]\n");
     exit(64);
+}
+
+if ($command === 'bundle') {
+    try {
+        $composer = is_string($options['composer'] ?? null) ? $options['composer'] : null;
+        $report = (new BundleBuilder(ComposerProcess::locate($composer)))->build($target, $options['host-lock'], ($options['update'] ?? false) === true);
+    } catch (Throwable $exception) {
+        fwrite(STDERR, "Bundle failed: {$exception->getMessage()}\n");
+        exit(1);
+    }
+
+    fwrite(STDOUT, ($report->lockWritten ? 'Resolved and wrote bundle.lock. ' : 'Installed from bundle.lock. ')
+        .($report->manifest->packages === [] ? "bundle/ ships nothing: the host provides every requirement.\n" : "bundle/ ships:\n"));
+    foreach ($report->manifest->packages as $name => $package) {
+        fwrite(STDOUT, "  {$name} {$package['version']} (".implode(' or ', $package['license']).")\n");
+    }
+    if ($report->manifest->hostPackages !== []) {
+        fwrite(STDOUT, 'Relies on the host for: '.implode(', ', array_keys($report->manifest->hostPackages))."\n");
+    }
+    foreach ($report->warnings as $warning) {
+        fwrite(STDERR, "Warning: {$warning}\n");
+    }
+    exit(0);
 }
 
 try {

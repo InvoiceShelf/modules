@@ -30,7 +30,13 @@ final class PackageValidator
             }
         }
 
-        self::validateComposer($root.'/composer.json', $module->slug);
+        $requires = self::validateComposer($root.'/composer.json', $module);
+
+        if ($module->bundlesDependencies()) {
+            BundleValidator::validate($root, $module, $requires);
+        } elseif (file_exists($root.'/'.BundleManifest::DIRECTORY)) {
+            throw new InvalidArgumentException("Module packages with dependency_policy 'host-provided-only' must not contain bundle/.");
+        }
 
         if ($module->uninstall !== null) {
             CleanupValidator::validateDirectory($root, $module->uninstall->dataCleanup);
@@ -60,8 +66,15 @@ final class PackageValidator
         return $decoded;
     }
 
-    private static function validateComposer(string $path, string $slug): void
+    /**
+     * Check composer.json and return the third-party packages it requires,
+     * which only a bundled module may have.
+     *
+     * @return list<string>
+     */
+    private static function validateComposer(string $path, ModuleManifest $module): array
     {
+        $slug = $module->slug;
         $composer = self::jsonFile($path, 'composer.json');
         if (($composer['name'] ?? null) !== "invoiceshelf/module-{$slug}") {
             throw new InvalidArgumentException("composer.json name must be invoiceshelf/module-{$slug}.");
@@ -73,7 +86,16 @@ final class PackageValidator
             throw new InvalidArgumentException('composer.json must declare a require object.');
         }
 
+        $requires = [];
         foreach ($composer['require'] as $package => $constraint) {
+            if ($module->bundlesDependencies() && is_string($package) && is_string($constraint) && self::isThirdParty($package)) {
+                if (! BundleManifest::isConstraint($constraint)) {
+                    throw new InvalidArgumentException("composer.json dependency '{$package}' must use a valid Composer constraint.");
+                }
+                $requires[] = $package;
+
+                continue;
+            }
             if (! is_string($package) || ! is_string($constraint)
                 || (! in_array($package, ['php', 'invoiceshelf/modules'], true) && ! str_starts_with($package, 'ext-'))) {
                 throw new InvalidArgumentException("composer.json dependency '{$package}' is not host-provided.");
@@ -83,5 +105,35 @@ final class PackageValidator
                 throw new InvalidArgumentException("composer.json dependency '{$package}' must use a supported SemVer constraint.");
             }
         }
+
+        return $requires;
+    }
+
+    /**
+     * The third-party packages a composer.json `require` object names.
+     *
+     * @param  array<mixed>  $require
+     * @return array<string, string>
+     */
+    public static function thirdPartyRequires(array $require): array
+    {
+        $packages = [];
+        foreach ($require as $package => $constraint) {
+            if (is_string($package) && is_string($constraint) && self::isThirdParty($package)) {
+                $packages[$package] = $constraint;
+            }
+        }
+
+        return $packages;
+    }
+
+    /**
+     * A package a bundled module may ship: a real Composer package that is not
+     * a platform requirement, the SDK, or another InvoiceShelf module (module
+     * dependencies go in module.json's module_dependencies).
+     */
+    public static function isThirdParty(string $package): bool
+    {
+        return BundleManifest::isPackageName($package) && ! str_starts_with($package, 'invoiceshelf/');
     }
 }

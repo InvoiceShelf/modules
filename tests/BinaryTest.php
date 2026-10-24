@@ -67,6 +67,35 @@ PHP,
         }
     }
 
+    public function test_bundle_requires_a_host_lock_and_reports_failures_on_stderr(): void
+    {
+        [$usageCode, , $usageError] = $this->runBinary(['bundle', '.']);
+        $this->assertSame(64, $usageCode);
+        $this->assertStringContainsString('--host-lock=<host composer.lock>', $usageError);
+
+        [$failureCode, $output, $error] = $this->runBinary(['bundle', sys_get_temp_dir(), '--host-lock=/nonexistent/composer.lock']);
+        $this->assertSame(1, $failureCode);
+        $this->assertSame('', $output);
+        $this->assertStringStartsWith('Bundle failed: ', $error);
+    }
+
+    /**
+     * @param  list<string>  $arguments
+     * @return array{int, string, string}
+     */
+    private function runBinary(array $arguments): array
+    {
+        $pipes = [];
+        $process = proc_open([PHP_BINARY, dirname(__DIR__).'/bin/invoiceshelf-module', ...$arguments], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $this->assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [proc_close($process), $stdout, $stderr];
+    }
+
     /** @return array<string, mixed> */
     private function moduleManifest(): array
     {

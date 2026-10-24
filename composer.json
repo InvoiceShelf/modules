@@ -9,6 +9,7 @@
     "license": "MIT",
     "type": "library",
     "require": {
+        "composer/semver": "^3.4",
         "nikic/php-parser": "^5.0",
         "php": "^8.3",
         "nwidart/laravel-modules": "^13.0"
