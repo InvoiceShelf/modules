@@ -18,6 +18,94 @@ export interface ComponentExtensionContribution extends ExtensionContribution {
   props?: Record<string, unknown>
 }
 
+/**
+ * Host records a module can attach actions, panels and form sections to. Not
+ * every entity has every slot; the SDK README lists where each one renders.
+ */
+export type ExtensionEntity =
+  | 'invoice'
+  | 'estimate'
+  | 'recurring-invoice'
+  | 'customer'
+  | 'payment'
+  | 'expense'
+  | 'item'
+
+/**
+ * Where an entity action renders: in each list row's menu, on the record's own
+ * page, or in the header of its create and edit form.
+ */
+export type EntityActionPlacement = 'list' | 'detail' | 'form'
+
+/**
+ * A read-only snapshot of a host record, built for modules: plain values under
+ * the host API's field names, frozen, never a live store object. A field that
+ * does not apply to the entity is null. Amounts are in the currency's minor
+ * units, as the host API returns them. Load anything else by `id` through
+ * `client`.
+ */
+export interface EntityRecord {
+  readonly entity: ExtensionEntity
+  readonly id: number
+  /** The document number (invoice, estimate, payment number), or the name of a customer or item. */
+  readonly number: string | null
+  readonly status: string | null
+  readonly paid_status: string | null
+  /** The invoice type, such as `CREDIT_NOTE`. */
+  readonly type: string | null
+  readonly customer_id: number | null
+  readonly total: number | null
+  readonly due_amount: number | null
+  readonly currency_code: string | null
+  readonly related_invoice_id: number | null
+}
+
+/** Handed as the `context` prop to list and detail actions and to panels. */
+export interface EntityContext {
+  readonly entity: ExtensionEntity
+  readonly placement: 'list' | 'detail'
+  record(): EntityRecord | null
+  can(ability: string | string[]): boolean
+  /** Reload the record in the host view, for example after the module changed it through the API. */
+  refresh(): void | Promise<void>
+}
+
+/** Handed as the `context` prop to form actions and form sections, and to save hooks. */
+export interface EntityFormContext {
+  readonly entity: ExtensionEntity
+  isEdit(): boolean
+  /** The saved record while editing; null for a new one. */
+  record(): EntityRecord | null
+  can(ability: string | string[]): boolean
+  /** Document forms (invoice, estimate) only; false elsewhere. */
+  isRecurring(): boolean
+  /** Document forms only; null elsewhere. */
+  total(): number | null
+  currencyCode(): string | null
+  date(): string | null
+  dueDate(): string | null
+}
+
+/**
+ * Runs after the host saved the record, on create and on update, in priority
+ * order. Return true to take over the next navigation (the first hook that
+ * does wins); false or nothing keeps the host's. A hook that throws or rejects
+ * is logged and reported to the user as a warning: the record stays saved and
+ * the host navigates as usual, so the user is never invited to save twice.
+ */
+export interface EntitySaveHookContribution extends ExtensionContribution {
+  handle(saved: EntityRecord, context: EntityFormContext): boolean | void | Promise<boolean | void>
+}
+
+/** An entry in the global New menu and the command palette. */
+export interface CreateActionContribution extends ExtensionContribution {
+  /** A translation key. */
+  label: string
+  icon: string
+  to: RouteLocationRaw
+  ability?: string | string[]
+}
+
 export interface RichEditorContext {
   getHtml(): string
   insertContent(content: string): void
@@ -119,6 +207,24 @@ export interface InvoiceShelfExtensionApi {
   registerHeaderAction(contribution: ComponentExtensionContribution): () => void
   registerCompanyLayoutOverlay(contribution: ComponentExtensionContribution): () => void
   registerRichEditorToolbarAction(contribution: ComponentExtensionContribution): () => void
+  /** Add an entry to the global New menu and the command palette. */
+  registerCreateAction(contribution: CreateActionContribution): () => void
+  /**
+   * Add an action to a record: in each list row's menu (`'list'`), on its page
+   * (`'detail'`) or in its form header (`'form'`). The component receives
+   * `context`: an `EntityContext`, or an `EntityFormContext` for `'form'`.
+   */
+  registerEntityAction(
+    entity: ExtensionEntity,
+    placement: EntityActionPlacement,
+    contribution: ComponentExtensionContribution,
+  ): () => void
+  /** Add a panel to a record's page, below the host's content. The component receives `context: EntityContext`. */
+  registerEntityPanel(entity: ExtensionEntity, contribution: ComponentExtensionContribution): () => void
+  /** Add a section to a record's create and edit form. The component receives `context: EntityFormContext`. */
+  registerEntityFormSection(entity: ExtensionEntity, contribution: ComponentExtensionContribution): () => void
+  /** Run after the host saved a record from its form. See `EntitySaveHookContribution`. */
+  registerEntitySaveHook(entity: ExtensionEntity, contribution: EntitySaveHookContribution): () => void
   registerCompanySettingsNavigation(contribution: SettingsNavigationContribution): () => void
   registerAdminSettingsNavigation(contribution: SettingsNavigationContribution): () => void
   registerCompanySettingsPage(contribution: SettingsPageContribution): () => void

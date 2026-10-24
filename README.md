@@ -9,6 +9,7 @@ SDK **3.5** supports Module API **1.4**. First-party module packages live in the
 - Sidebar entries and schema-driven, per-company settings.
 - Local, compiled JavaScript and CSS registered with the host.
 - Typed frontend contributions through [`frontend/index.d.ts`](frontend/index.d.ts): full-page routes, settings pages, menus, HTTP access, translations, notifications, and lifecycle events. The host supplies the Vue, router, Axios, and i18n instances—modules do not bundle another framework runtime.
+- Actions, panels, form sections and save hooks on host records (invoices, estimates, customers, payments and more), plus entries in the global New menu.
 - Company abilities contributed to the host's authorization catalogue, so a module can ship its own permissions instead of reusing host ones.
 - Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and read-only company-data queries. `CompanyDataReader` covers the AI assistant's built-in queries plus `companyMembers()` and `existingInvoiceIds()` for modules that assign work to members or stamp their entries against invoices. Module code must not depend on InvoiceShelf Eloquent models.
 - AI drivers through [`src/Ai`](src/Ai): extend `AiDriver`, return `AiChatResponse`, and throw `AiException` for safe, localizable provider failures.
@@ -202,6 +203,43 @@ and at `/admin/modules/{slug}/settings` for a settings-only module.
 `registerPage`, `Registry::registerAbility`, and the `CompanyDataReader::companyMembers()` and
 `existingInvoiceIds()` queries are Module API **1.3.0** additions. Declare
 `"module_api": "^1.3.0"` in `module.json` before using them.
+
+### Extending host records
+
+A module can add to the host's own screens without importing them. Every contribution takes a stable `id`, an optional `priority` (lower first) and `visible` predicate, and returns a teardown; the component receives a `context` prop.
+
+| Entity | List row action | Detail action and panel | Form action, section and save hook |
+| --- | --- | --- | --- |
+| `invoice` | yes | yes | yes |
+| `estimate` | yes | yes | yes |
+| `recurring-invoice` | yes | yes | |
+| `customer` | yes | yes | yes |
+| `payment` | yes | yes | |
+| `expense` | yes | | |
+| `item` | yes | | |
+
+```ts
+extensions.registerEntityPanel('invoice', { id: 'einvoicing.status', component: EInvoiceStatusPanel })
+extensions.registerEntityAction('invoice', 'detail', { id: 'einvoicing.download-xml', component: DownloadXmlButton })
+extensions.registerEntityAction('customer', 'list', { id: 'crm.open-in-crm', component: OpenInCrm, visible: () => featureOn() })
+extensions.registerEntityFormSection('customer', { id: 'einvoicing.peppol-id', component: PeppolIdField })
+
+extensions.registerEntitySaveHook('customer', {
+  id: 'einvoicing.save-peppol-id',
+  async handle(customer, context) {
+    await extensions.client.put(`/api/v1/e-invoicing/customers/${customer.id}`, pendingPeppolId())
+    return false // keep the host's navigation
+  },
+})
+
+extensions.registerCreateAction({ id: 'tasks.new', label: 'tasks.new_task', icon: 'ClipboardDocumentListIcon', to: '/admin/modules/tasks-projects/new', ability: 'tasks-projects:create-task' })
+```
+
+- **Contexts.** List and detail actions and panels get an `EntityContext`: `record()` returns a frozen `EntityRecord` (id, number, status, customer, totals in minor units, currency), never a host store object, `can()` checks abilities and `refresh()` reloads the host view after the module changed the record. Form actions and sections get an `EntityFormContext` with `isEdit()`, `record()` while editing and, on document forms, the live total, currency and dates.
+- **Save hooks** run after the host saved the record, on create and update. Return `true` only to take over the next navigation. A hook that throws or rejects is logged and shown to the user as a warning; the record stays saved and the host navigates as usual, so a failing module never makes a user save twice.
+- A slot that nobody contributes to renders nothing at all.
+
+These slots are Module API **1.4.0** additions; declare `"module_api": "^1.4.0"` to use them.
 
 ### Thin clients
 

@@ -79,6 +79,11 @@ class ManifestTest extends TestCase
         $this->assertStringContainsString('registerRichEditorToolbarAction', $types);
         $this->assertStringContainsString('registerCompanySettingsPage', $types);
         $this->assertStringContainsString('registerPage(contribution: PageContribution)', $types);
+        $this->assertStringContainsString('registerEntityAction(', $types);
+        $this->assertStringContainsString('registerEntityPanel(entity: ExtensionEntity', $types);
+        $this->assertStringContainsString('registerEntityFormSection(entity: ExtensionEntity', $types);
+        $this->assertStringContainsString('registerEntitySaveHook(entity: ExtensionEntity', $types);
+        $this->assertStringContainsString('registerCreateAction(contribution: CreateActionContribution)', $types);
         $this->assertStringContainsString("'company:changed'", $types);
     }
 
