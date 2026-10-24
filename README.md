@@ -11,6 +11,7 @@ SDK **3.5** supports Module API **1.4**. First-party module packages live in the
 - Typed frontend contributions through [`frontend/index.d.ts`](frontend/index.d.ts): full-page routes, settings pages, menus, HTTP access, translations, notifications, and lifecycle events. The host supplies the Vue, router, Axios, and i18n instances—modules do not bundle another framework runtime.
 - Actions, panels, form sections and save hooks on host records (invoices, estimates, customers, payments and more), plus entries in the global New menu.
 - Company abilities contributed to the host's authorization catalogue, so a module can ship its own permissions instead of reusing host ones.
+- Whole invoices to read and structured XML to embed in invoice PDFs (Module API 1.5.0), for modules that produce e-invoices; see [Documents and invoice PDFs](#documents-and-invoice-pdfs).
 - Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and read-only company-data queries. `CompanyDataReader` covers the AI assistant's built-in queries plus `companyMembers()` and `existingInvoiceIds()` for modules that assign work to members or stamp their entries against invoices. Module code must not depend on InvoiceShelf Eloquent models.
 - AI drivers through [`src/Ai`](src/Ai): extend `AiDriver`, return `AiChatResponse`, and throw `AiException` for safe, localizable provider failures.
 
@@ -22,8 +23,8 @@ Declare compatibility in `module.json`, then test it against the host versions y
 
 | Concern | Current contract |
 | --- | --- |
-| SDK | `invoiceshelf/modules` `^3.5` |
-| Module API | `^1.3.0`, or `^1.4.0` for a module with bundled dependencies |
+| SDK | `invoiceshelf/modules` `^3.6` |
+| Module API | `^1.3.0`; `^1.4.0` for bundled dependencies and record slots; `^1.5.0` for documents and invoice PDF attachments |
 | Host application | Your explicit InvoiceShelf 3.x range |
 | PHP | The range your module actually supports |
 
@@ -240,6 +241,17 @@ extensions.registerCreateAction({ id: 'tasks.new', label: 'tasks.new_task', icon
 - A slot that nobody contributes to renders nothing at all.
 
 These slots are Module API **1.4.0** additions; declare `"module_api": "^1.4.0"` to use them.
+
+### Documents and invoice PDFs
+
+A module that turns invoices into other documents, such as an EN 16931 e-invoice, reads them through `InvoiceDocumentReader` and can hand the host an XML to embed in every invoice PDF.
+
+- **Reading.** `InvoiceDocumentReader::invoiceDocument($companyId, $invoiceId)` returns an `InvoiceDocument` ([`src/Documents/Data`](src/Documents/Data)): seller and buyer with addresses and tax identifiers, lines with their unit codes, document and line taxes with their EN 16931 category codes, the related invoice of a credit note, and the totals. Money is in hundredths exactly as stored, credit notes negative, nothing recalculated. An invoice of another company reads as `null`. `seller($companyId)` reads the company alone, for checks made before any invoice exists.
+- **Embedding.** Implement `InvoicePdfAttachmentProvider` and register it once: `Registry::registerInvoicePdfAttachmentProvider('e-invoicing', FacturXProvider::class)`. On every invoice PDF the host renders (download, public link, customer portal, mail attachment, archive), while the module is enabled and `PdfCapabilities::embedsFacturX()` is true, it calls `attachmentFor()` and embeds the returned `FacturXAttachment` as `factur-x.xml` in a PDF/A-3b file. `appliesTo()` must stay cheap: the host also calls it to decide whether an archived PDF is still current.
+- **Failures never block billing.** A provider that throws is reported and the invoice gets its ordinary PDF, as does a PDF service that rejects the attachment.
+- Only Gotenberg can build the container; with dompdf, `embedsFacturX()` is false and providers are not asked. Show that to your users instead of reading the host's configuration.
+
+These are Module API **1.5.0** additions; declare `"module_api": "^1.5.0"` to use them.
 
 ### Thin clients
 

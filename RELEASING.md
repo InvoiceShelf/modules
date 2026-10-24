@@ -18,7 +18,7 @@ An official module normally calls the tagged SDK workflow from its own tag workf
 ```yaml
 jobs:
   release:
-    uses: InvoiceShelf/modules/.github/workflows/module-release.yml@3.5.0
+    uses: InvoiceShelf/modules/.github/workflows/module-release.yml@3.6.0
     with:
       channel: stable
     secrets: inherit
