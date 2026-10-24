@@ -7,6 +7,8 @@ namespace InvoiceShelf\Modules\Tests;
 use InvalidArgumentException;
 use InvoiceShelf\Modules\Ai\Contracts\AiDriver;
 use InvoiceShelf\Modules\Ai\Data\AiChatResponse;
+use InvoiceShelf\Modules\Pdf\Contracts\InvoicePdfAttachmentProvider;
+use InvoiceShelf\Modules\Pdf\Data\FacturXAttachment;
 use InvoiceShelf\Modules\Registry;
 use InvoiceShelf\Modules\Settings\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -417,6 +419,49 @@ class RegistryTest extends TestCase
         ];
     }
 
+    public function test_invoice_pdf_attachment_provider_is_registered_per_module(): void
+    {
+        Registry::flushDrivers();
+        Registry::registerInvoicePdfAttachmentProvider('e-invoicing', FakeAttachmentProvider::class);
+        Registry::registerInvoicePdfAttachmentProvider('e-invoicing', FakeAttachmentProvider::class);
+
+        $this->assertSame(
+            ['e-invoicing' => ['class' => FakeAttachmentProvider::class]],
+            Registry::allDrivers(Registry::INVOICE_PDF_ATTACHMENT),
+        );
+    }
+
+    public function test_invoice_pdf_attachment_provider_rejects_a_second_class_for_one_module(): void
+    {
+        Registry::flushDrivers();
+        Registry::registerInvoicePdfAttachmentProvider('e-invoicing', FakeAttachmentProvider::class);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('already registered an invoice PDF attachment provider');
+
+        Registry::registerInvoicePdfAttachmentProvider('e-invoicing', OtherFakeAttachmentProvider::class);
+    }
+
+    #[DataProvider('invalidAttachmentProviders')]
+    public function test_invoice_pdf_attachment_provider_rejects_malformed_registrations(string $slug, string $class, string $message): void
+    {
+        Registry::flushDrivers();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Registry::registerInvoicePdfAttachmentProvider($slug, $class);
+    }
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function invalidAttachmentProviders(): iterable
+    {
+        yield 'non-kebab slug' => ['EInvoicing', FakeAttachmentProvider::class, 'lower-case kebab-case'];
+        yield 'missing class' => ['e-invoicing', 'Missing\\Provider', 'concrete class implementing'];
+        yield 'unrelated class' => ['e-invoicing', self::class, 'concrete class implementing'];
+        yield 'abstract class' => ['e-invoicing', AbstractFakeAttachmentProvider::class, 'concrete class implementing'];
+    }
+
     public function test_all_drivers_returns_empty_array_for_unknown_type(): void
     {
         Registry::flushDrivers();
@@ -615,3 +660,20 @@ class FakeAiDriver extends AiDriver
 }
 
 abstract class AbstractFakeAiDriver extends AiDriver {}
+
+class FakeAttachmentProvider implements InvoicePdfAttachmentProvider
+{
+    public function appliesTo(int $companyId): bool
+    {
+        return true;
+    }
+
+    public function attachmentFor(int $companyId, int $invoiceId): ?FacturXAttachment
+    {
+        return new FacturXAttachment('<rsm:CrossIndustryInvoice/>');
+    }
+}
+
+class OtherFakeAttachmentProvider extends FakeAttachmentProvider {}
+
+abstract class AbstractFakeAttachmentProvider implements InvoicePdfAttachmentProvider {}

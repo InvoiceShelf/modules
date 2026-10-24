@@ -6,6 +6,7 @@ namespace InvoiceShelf\Modules;
 
 use InvalidArgumentException;
 use InvoiceShelf\Modules\Ai\Contracts\AiDriver;
+use InvoiceShelf\Modules\Pdf\Contracts\InvoicePdfAttachmentProvider;
 use InvoiceShelf\Modules\Settings\Schema;
 
 /**
@@ -18,6 +19,9 @@ use InvoiceShelf\Modules\Settings\Schema;
  */
 class Registry
 {
+    /** The driver type invoice PDF attachment providers are stored under, keyed by module slug. */
+    public const INVOICE_PDF_ATTACHMENT = 'invoice_pdf_attachment';
+
     /**
      * Sidebar items keyed by module slug.
      *
@@ -378,6 +382,38 @@ class Registry
         if (! is_array($meta['config_fields'] ?? null)) {
             throw new InvalidArgumentException('AI driver config_fields must be an array.');
         }
+    }
+
+    /**
+     * Register the class that supplies the XML embedded in the module's
+     * invoice PDFs. Module API 1.5.0; see InvoicePdfAttachmentProvider.
+     *
+     * One per module. Registering the same class again is a no-op, as
+     * providers boot on every request.
+     *
+     * @param  class-string<InvoicePdfAttachmentProvider>  $class
+     */
+    public static function registerInvoicePdfAttachmentProvider(string $slug, string $class): void
+    {
+        if (! preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $slug)) {
+            throw new InvalidArgumentException("Module slug '{$slug}' must be lower-case kebab-case, matching the module.json slug.");
+        }
+
+        if (! class_exists($class) || ! is_subclass_of($class, InvoicePdfAttachmentProvider::class) || (new \ReflectionClass($class))->isAbstract()) {
+            throw new InvalidArgumentException('Invoice PDF attachment provider must be a concrete class implementing '.InvoicePdfAttachmentProvider::class.'.');
+        }
+
+        $meta = ['class' => $class];
+
+        if ((static::$drivers[self::INVOICE_PDF_ATTACHMENT][$slug] ?? null) === $meta) {
+            return;
+        }
+
+        if (isset(static::$drivers[self::INVOICE_PDF_ATTACHMENT][$slug])) {
+            throw new InvalidArgumentException("Module '{$slug}' already registered an invoice PDF attachment provider.");
+        }
+
+        static::registerDriver(self::INVOICE_PDF_ATTACHMENT, $slug, $meta);
     }
 
     /**
