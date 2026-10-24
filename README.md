@@ -253,6 +253,21 @@ A module that turns invoices into other documents, such as an EN 16931 e-invoice
 
 These are Module API **1.5.0** additions; declare `"module_api": "^1.5.0"` to use them.
 
+### Responsive classes
+
+Your stylesheet is a Tailwind build of its own, loaded next to the host's, and the two share class names: both may define `.hidden` or `.w-full`. Between rules of equal weight the later sheet wins, so the host adds its stylesheet again after the module sheets, and a module can never break the app's layout. The cost lands on your markup: the host's plain utilities win over your breakpoint variants. `hidden sm:flex` stays hidden on desktop unless the host's own build happens to contain `sm:flex` too, and that changes from release to release.
+
+Never pair a plain utility with a breakpoint variant for the same property. Split the property into ranges that don't overlap, so only one class matches at any width:
+
+| Instead of | Write |
+| --- | --- |
+| `hidden sm:flex` | `max-sm:hidden sm:flex` |
+| `w-full sm:w-[480px] lg:w-[640px]` | `max-sm:w-full sm:max-lg:w-[480px] lg:w-[640px]` |
+| `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` | `max-sm:grid-cols-1 sm:max-lg:grid-cols-2 lg:grid-cols-4` |
+| `flex-col sm:flex-row` | `max-sm:flex-col` (row is the default) |
+
+The same applies to a class you put on a host component. Its root carries the host's own classes, so `<BaseInputGroup class="sm:w-48">` loses to the `w-full` it already has; give the width to a wrapper element of your own.
+
 ### Thin clients
 
 The InvoiceShelf mobile clients run the same frontend as the web app, but as a static app package
