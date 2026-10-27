@@ -2,7 +2,7 @@
 
 The MIT-licensed SDK for official [InvoiceShelf](https://invoiceshelf.com) v3 modules. It extends [`nwidart/laravel-modules`](https://github.com/nWidart/laravel-modules) with the contracts used by InvoiceShelf's module host and signed marketplace packages.
 
-SDK **3.5** supports Module API **1.4**. First-party module packages live in their own repositories and are licensed `AGPL-3.0-only`; this SDK remains MIT.
+SDK **3.7** supports Module API **1.6**. First-party module packages live in their own repositories and are licensed `AGPL-3.0-only`; this SDK remains MIT.
 
 ## What a module can add
 
@@ -12,6 +12,7 @@ SDK **3.5** supports Module API **1.4**. First-party module packages live in the
 - Actions, panels, form sections and save hooks on host records (invoices, estimates, customers, payments and more), plus entries in the global New menu.
 - Company abilities contributed to the host's authorization catalogue, so a module can ship its own permissions instead of reusing host ones.
 - Whole invoices to read and structured XML to embed in invoice PDFs (Module API 1.5.0), for modules that produce e-invoices; see [Documents and invoice PDFs](#documents-and-invoice-pdfs).
+- QR codes drawn by the host (Module API 1.6.0), so a module needs no QR library of its own; see [QR codes](#qr-codes).
 - Narrow host contracts under [`src/Contracts/Host`](src/Contracts/Host) for settings, authorization, and read-only company-data queries. `CompanyDataReader` covers the AI assistant's built-in queries plus `companyMembers()` and `existingInvoiceIds()` for modules that assign work to members or stamp their entries against invoices. Module code must not depend on InvoiceShelf Eloquent models.
 - AI drivers through [`src/Ai`](src/Ai): extend `AiDriver`, return `AiChatResponse`, and throw `AiException` for safe, localizable provider failures.
 
@@ -23,8 +24,8 @@ Declare compatibility in `module.json`, then test it against the host versions y
 
 | Concern | Current contract |
 | --- | --- |
-| SDK | `invoiceshelf/modules` `^3.6` |
-| Module API | `^1.3.0`; `^1.4.0` for bundled dependencies and record slots; `^1.5.0` for documents and invoice PDF attachments |
+| SDK | `invoiceshelf/modules` `^3.7` |
+| Module API | `^1.3.0`; `^1.4.0` for bundled dependencies and record slots; `^1.5.0` for documents and invoice PDF attachments; `^1.6.0` for QR codes |
 | Host application | Your explicit InvoiceShelf 3.x range |
 | PHP | The range your module actually supports |
 
@@ -252,6 +253,24 @@ A module that turns invoices into other documents, such as an EN 16931 e-invoice
 - Only Gotenberg can build the container; with dompdf, `embedsFacturX()` is false and providers are not asked. Show that to your users instead of reading the host's configuration.
 
 These are Module API **1.5.0** additions; declare `"module_api": "^1.5.0"` to use them.
+
+### QR codes
+
+Ask the container for `QrCodeGenerator` instead of bundling a QR library:
+
+```php
+use InvoiceShelf\Modules\Contracts\Host\QrCodeGenerator;
+
+$src = app(QrCodeGenerator::class)->svgDataUri($payload, size: 160);
+// <img src="{{ $src }}" alt="" style="width: 40mm; height: 40mm;">
+```
+
+- **`svg()`** returns an SVG document and **`svgDataUri()`** the same as a `data:` URI for an `<img>` in a PDF template or a Blade view. Both PDF drivers draw it without fetching anything, and no image extension is needed on the server.
+- **Content** is UTF-8 text. Plain ASCII is encoded as it is; anything else is encoded as UTF-8 with an ECI marker, which is what EPC (SEPA credit transfer) and Swiss QR-bill payloads expect.
+- **Options:** `$size` is the edge in pixels with the quiet zone included, `$margin` the quiet zone in modules (4 by default, as the QR standard asks), and `ErrorCorrection` ([`src/Qr`](src/Qr)) runs from `Low` to `High`, `Medium` by default, which the payment specifications above require.
+- Content that is empty or too long for a QR code at the chosen level throws `InvalidArgumentException`.
+
+These are Module API **1.6.0** additions; declare `"module_api": "^1.6.0"` to use them.
 
 ### Responsive classes
 
